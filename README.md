@@ -1,87 +1,154 @@
 # CubeShift
-A Python code to artificially redshift IFU data
 
-==== Description ====
-This project provides a Python pipeline for simulating how low-redshift IFU (Integral Field Unit) data cubes would appear if observed with different telescopes at higher redshifts. The code supports spatial resampling, resolution degradation, luminosity scaling, and PSF convolution to replicate the observational characteristics of instruments such as JWST NIRCam.
+A Python package to artificially redshift IFU data.
 
-The pipeline is modular and designed for easy extension to other telescopes by adding new specifications to the Telescope class.
+CubeShift simulates how a low-redshift IFU (Integral Field Unit) data cube would look if the
+same galaxy were observed at a higher redshift with a different instrument (currently Keck/KCWI
+→ JWST/NIRSpec). It redshifts the wavelength axis, dims the flux, bins to the target spaxels at
+the new angular scale, pads to the target field of view, matches the PSF and spectral resolution,
+and resamples onto the target wavelength grid.
 
-=== Requirements ===
+> **Status:** the code was recently reorganised into a single package with no intended change to
+> its outputs. The known science issues from the code review are listed as expected failures in
+> `tests/test_physics.py` and are being fixed one at a time. Treat simulated cubes as provisional
+> until those tests pass.
 
-Python 3.9 or higher
+## Installation
 
-numpy
+Python ≥ 3.10.
 
-scipy
+```bash
+git clone https://github.com/bronreichardtchu/CubeShift.git
+cd CubeShift
+pip install -e ".[dev]"        # add ",plot" for scale bars / reprojection, ",mosaic" for montage
+```
 
-astropy
+(`pip install -r requirements.txt` does the same.)
 
-mpdaf
+### JWST instrument files
 
-matplotlib
+The NIRSpec filter-throughput (`jwst_nirspec_<filter>_trans.fits`) and dispersion
+(`jwst_nirspec_<grating>_disp.fits`) tables from JDox are not distributed with the package. Put
+them in one folder (sub-folders `Transmission Filters/` and `Dispersion Filters/` also work), then
+either pass `data_dir=...` or set
 
-It is recommended to use a virtual environment. 
-You can install the required packages using:
+```bash
+export CUBESHIFT_DATA_DIR=/path/to/jwst_files
+```
 
-pip install -r requirements.txt
+`cubeshift.testing.write_mock_instrument_files(dir)` writes stand-in tables (not real JWST data).
+Use these for tests and for trying out the pipeline.
 
-==== Usage ====
-The entire redshifting pipeline is applied via the simulate_obs function in main.py. Example workflow:
+## Usage
 
-Define the telescope instrument. Either use an existing one from the telescope dictionary in binData, or create your own telescope using the Telescope class. 
+```python
+import cubeshift
 
-Run the simulation on your IFU data cube at the desired redshift by calling simulate_observation with 
-    1. the file path to the IFU cube
-    2. the name of the telescope you wish to simulate (formatted as dictionary key)
-    3. the observed redshift
-    4. the simulated redshift
-    5. source telescope
-    6. target telescope
-    7. optional: galaxy name (for file structure purposes)
-    8. optional: check numbers (boolean)
-    9. optional: return the file path of the final cube (boolean)
+result = cubeshift.simulate_observation(
+    "cgcg453_red_mosaic.fits",          # path or mpdaf Cube
+    z_obs=0.025, z_sim=3,
+    source_telescope="Keck_KCWI",       # key of cubeshift.TELESCOPES, or a cubeshift.Telescope
+    target_telescope="JWST_NIRSpec",
+    output_dir="Output_cubes", galaxy_name="CGCG453",
+    save_intermediates=True,            # also write the cube after each step
+)
+result.cube          # final mpdaf Cube
+result.filter_name   # e.g. 'f170lp'
+result.disperser     # e.g. 'g235h'
+result.final_path
+```
 
+To add an instrument, create a `cubeshift.Telescope(...)` (a target needs `fov_x`/`fov_y`) and pass it
+directly, or add it to `cubeshift.instruments.TELESCOPES`.
 
-for convienince, this program includes a helper function that converts quickly from KECK KCWI to JWST NIRSpec by presetting many of the parameters, including telescope types, and applies milky way extinction correction in the correct order. It may be helpful to create your own version of this template if you are using the same source and target telescopes for a variety of different galaxies.
+### Keck/KCWI → JWST/NIRSpec with Milky Way extinction
 
-Template
+`scripts/run_kcwi_to_nirspec.py` replaces the old `test_Keck_to_JWST_full_pipeline`. It removes the
+Milky Way extinction at the observed frame, runs the simulation, and puts the extinction back for
+the simulated frame. A_V values are passed as arguments, not typed in at a prompt:
 
-    1. Set source and target telescope
-    2. use preRedshiftExtCor function from extinctionCorrection.py to apply the milkyway correction the cube
-    3. then, apply the main redshifting pipeline using simulate_observation to the cube
-    4. finally, use postPipelineExtCor to undo the mikly way correction 
-    5. save the cube
+```bash
+python scripts/run_kcwi_to_nirspec.py cgcg453_red_mosaic.fits --z-obs 0.025 --z-sim 3 \
+    --galaxy CGCG453 --av-obs 0.385 --av-sim 0.072 --noise-scale 0.5 \
+    --data-dir /path/to/jwst_files --output-dir Output_cubes
+```
 
-Applied template:
+Other scripts in `scripts/`:
+- `sfr_cgcg453.py`: Hβ/Hγ SFR maps.
+- `compare_oiii.py`: [OIII] maps at several redshifts.
+- `sum_spectra.py`: integrated spectrum.
+- `hbeta_histogram.py`: Hβ flux distributions.
+- `plot_spectra_with_bands.py`: multi-z spectra with NIRSpec bands.
 
-    test_Keck_to_JWST_full_pipeline(file_path, z_obs, z_sim, galaxy_name):
-        # 1
-        source_telescope = telescope_specs["Keck_KCWI"]
-        target_telescope = telescope_specs["JWST_NIRSpec"]
-        
-        # 2
-        ext_corr_cube = preRedshiftExtCor(file_path)
-        
-        # 3
-        final_pipeline_cube, final_pipeline_cube_path = simulate_observation(ext_corr_cube, "JWST_NIRSpec", z_obs, z_sim, source_telescope, target_telescope, galaxy_name = galaxy_name, return_final_cube_path=True)
-        
-        # 4
-        ext_inverted_cube = postPipelineExtCor(final_pipeline_cube_path)
-        
-        # 5
-        final_output_path_ext_invert = f"/Users/janev/Library/CloudStorage/OneDrive-Queen'sUniversity/MNU 2025/Output_cubes/{galaxy_name}/z_{z_sim}_final_pipeline_with_ext_{galaxy_name}_cube.fits"
+Each takes `--help`.
 
-        ext_inverted_cube.write(final_output_path_ext_invert)
-        print(" Final cube saved to: ", final_output_path_ext_invert)
+## Package layout
 
+| module | contents |
+|---|---|
+| `cubeshift.pipeline` | `simulate_observation`, `SimulationResult` |
+| `cubeshift.redshift` | `redshift_wavelength_axis`, `air_to_vac` |
+| `cubeshift.cosmology` | `rescale_flux`, angular/physical scales |
+| `cubeshift.binning` | `bin_data` (sum/mean/median, flux or surface brightness), `bin_list_of_cubes` |
+| `cubeshift.resample` | `resample_cube_to_telescope_and_redshift`, `pad_cube_with_background`, `get_spaxel_area` |
+| `cubeshift.psf` | `convolve_to_match_psf` |
+| `cubeshift.spectral` | disperser selection, `resample_spectral_axis`, LSF matching, `apply_dispersion_pipeline` |
+| `cubeshift.throughput` | NIRSpec filter selection and throughput |
+| `cubeshift.extinction` | Milky Way extinction (CCM89) |
+| `cubeshift.cropping`, `cubeshift.io` | cropping helpers; reading FITS (`read_cube`, `read_in_data`, `read_fits`) |
+| `cubeshift.instruments`, `cubeshift.config` | `Telescope`, `TELESCOPES`, NIRSpec mode tables; data-directory lookup |
+| `cubeshift.analysis` | `lines` (line fluxes, A(Hβ)), `balmer` (Hβ/Hγ maps, E(B−V)), `sfr`, `flux_histogram` |
+| `cubeshift.plotting` | `maps`, `spectra`, `rgb`, `quicklook`, `throughput` |
+| `cubeshift.testing` | synthetic cubes, mock JWST files, Gaussian line fit |
+| `cubeshift.mosaic` | `MosaicData` (in progress) |
 
+## Tests
 
-then, you can quickly define the essential information from you galaxy.
-for example:
+```bash
+pytest
+```
 
-    galaxy_name = "CGCG453"
-    file_path = "/Users/ ... /cgcg453_red_mosaic.fits" # your file path here 
-    z_obs = 0.025  # Original observed redshift
-    z_sim = 3 # Simulated redshift
+- `tests/test_golden.py` checks that every pipeline step reproduces the outputs of the pre-refactor
+  code (`tests/golden/`, generated by `tests/golden/make_golden.py` at commit `a58af38`).
+- `tests/test_physics.py` encodes the review's physical checks. Each is a strict `xfail` until its
+  fix lands. When you fix one, remove its marker and regenerate the golden files it changes in the
+  same commit.
 
-and call test_Keck_to_JWST_full_pipeline(file_path, z_obs, z_sim, galaxy_name).
+## Migrating from the old flat scripts
+
+Old modules in `cubeshiftPipeline/mainPipeline/` and `cubeshift/` map to:
+
+| old | new |
+|---|---|
+| `main.simulate_observation(path, telescope_name, z_obs, z_sim, source, target, galaxy_name, check_numbers, return_final_cube_path)` | `cubeshift.simulate_observation(cube, z_obs, z_sim, source, target, *, data_dir, output_dir, galaxy_name, save_intermediates)` → `SimulationResult` |
+| `main.test_Keck_to_JWST_full_pipeline` | `scripts/run_kcwi_to_nirspec.py` |
+| `binData.Telescope`, `binData.telescope_specs` | `cubeshift.instruments.Telescope`, `TELESCOPES` (alias `telescope_specs`) |
+| `binData.bin_cube(x, y, cube, ...)` (pipeline) | `cubeshift.binning.bin_data(x, y, cube, ..., surface_brightness=True)` |
+| `cubeshift/binData.bin_data` | `cubeshift.binning.bin_data` (default `surface_brightness=False`, as before) |
+| `binData.resample_cube_to_telescope_and_redshift(..., name="CGCG453")` | `cubeshift.resample.resample_cube_to_telescope_and_redshift(..., noise_scale=0.5)`; `check_numbers` removed |
+| `binData.calc_proper_dist` (pipeline: D_A in pc) | `cubeshift.cosmology.angular_diameter_distance_pc` |
+| `cubeshift/binData.calc_proper_dist` (kpc/arcsec) | `cubeshift.cosmology.kpc_per_arcsec` |
+| `zWavelengths.*` | `cubeshift.redshift.*` |
+| `util.air_to_vac(self, wl)` | `cubeshift.redshift.air_to_vac(wl)` |
+| `ioTools.read_in_data` (3 or 4 values) | `cubeshift.io.read_in_data` (always 4: `lamdas, data, var, header`) |
+| `readData.MyData`, `read_in_datacube`, `read_in_dataim` | `cubeshift.io.read_fits`, `read_in_datacube`, `read_in_dataim` |
+| `simulateObs.rescale_flux` | `cubeshift.cosmology.rescale_flux` |
+| `simulateObs.convolve_to_match_psf` | `cubeshift.psf.convolve_to_match_psf` |
+| `simulateObs.scale_luminosity_for_redshift`, `print_scaling_factors`, `generate_mock_jwst_cube` | removed (unused, inconsistent) |
+| `applyFilter.apply_transmission_filter(cube, z, line)` | `cubeshift.throughput.apply_transmission_filter(cube, z, line, data_dir=None)` |
+| `applyFilter.plot_*` | `cubeshift.plotting.throughput` |
+| `matchSpectral.apply_dispersion_pipeline(cube, z_obs, z_sim)` | `cubeshift.spectral.apply_dispersion_pipeline(cube, data_dir=None)` |
+| `matchSpectral.R_input_func`, `match_variable_resolution` | removed (broken / unused) |
+| `extinctionCorrection.compute_A_lambda` | `cubeshift.extinction.cardelli_A_lambda` (alias kept) |
+| `extinctionCorrection.preRedshiftExtCor` / `postPipelineExtCor` (interactive) | `cubeshift.extinction.milky_way_extinction_correction_cube(cube, Av, undo=...)` |
+| `cropCube.*` | `cubeshift.cropping.*` |
+| `fluxMeasurements.*` | `cubeshift.analysis.lines` / `cubeshift.analysis.sfr` |
+| `hBetaHgammaRatio.*` | `cubeshift.analysis.balmer` |
+| `hBetaFlux.*` | `cubeshift.analysis.flux_histogram` (`read_in_data_fits` → `cubeshift.io.read_in_data`) |
+| `comparisonMaps.*` | `cubeshift.plotting.maps` |
+| `plotSpectrum.*` | `cubeshift.plotting.spectra` |
+| `diagnostic_rbg` / `rgb_tools.make_rgb_hbeta_oiii_continuum` | `cubeshift.plotting.rgb.make_rgb_hbeta_oiii_continuum` |
+| `CGCG455mpdaf.*` | `cubeshift.plotting.quicklook` |
+| `makeTestCube`, `testPipeline` cube generators | `cubeshift.testing.make_test_cube`, `make_sersic_cube` |
+| `SFR.py`, `compareOIII.py`, `sumSpectra.py` | `scripts/sfr_cgcg453.py`, `scripts/compare_oiii.py`, `scripts/sum_spectra.py` |
+| `oldVersions.py`, `reprojectBinData.py`, `mosaicData.py` | removed / inlined in `plotting.maps` / `cubeshift.mosaic` |
