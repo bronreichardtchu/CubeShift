@@ -46,15 +46,20 @@ def test_luminosity_distance_dimming_of_redshift_and_rescale():
     assert f1 / f0 == pytest.approx(dl2, rel=1e-6)
 
 
-@pytest.mark.xfail(strict=True, reason="review #1: pad_cube_with_background inverts the mask")
 def test_padding_keeps_galaxy_unmasked(quiet):
+    """Review #1: the padding mask used to be inverted (galaxy masked, noise not)."""
     _, cr, _, inner, _ = _spatial_chain(quiet)
     mask = np.ma.getmaskarray(cr.data)
     assert mask[:, inner].mean() == 0.0
+    assert mask[:, ~inner].mean() == 0.0          # padding is valid simulated background
+    h = cr.data_header
+    footprint = np.zeros(cr.shape[1:], bool)
+    footprint[h["PADY0"]:h["PADY0"] + h["PADNY"], h["PADX0"]:h["PADX0"] + h["PADNX"]] = True
+    np.testing.assert_array_equal(footprint, inner)
 
 
-@pytest.mark.xfail(strict=True, reason="review #1/#2: masked galaxy spaxels are never converted SB -> flux")
 def test_spatial_resampling_conserves_flux(quiet):
+    """Review #1/#2: masked galaxy spaxels were never converted SB -> flux (0.48x)."""
     _, cr, _, inner, tot0 = _spatial_chain(quiet)
     dl2 = (cosmo.luminosity_distance(Z_OBS) / cosmo.luminosity_distance(Z_SIM)).value ** 2
     galaxy = np.ma.getdata(cr.data)[:, inner].sum() * cr.wave.get_step()

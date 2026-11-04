@@ -128,6 +128,11 @@ def pad_cube_with_background(cube, target_nx, target_ny, noise_scale=1.0, rng=No
     with the slice's background level and ``noise_scale`` x its std.  WCS,
     wavelength axis, variance and mask are carried over.
 
+    The padding is valid (unmasked) simulated background; inside the original
+    footprint the input mask is kept.  The footprint is recorded in the data
+    header as PADX0/PADY0 (0-based offsets) and PADNX/PADNY (size); the variance
+    of the padding is zero (no noise model yet, review #8).
+
     Parameters
     ----------
     cube : mpdaf.obj.Cube
@@ -149,7 +154,7 @@ def pad_cube_with_background(cube, target_nx, target_ny, noise_scale=1.0, rng=No
     if cube.var is not None:
         padded_var = np.zeros((nz, target_ny, target_nx), dtype=cube.var.dtype)
     if cube.mask is not None:
-        padded_mask = np.ones((nz, target_ny, target_nx), dtype=bool)
+        padded_mask = np.zeros((nz, target_ny, target_nx), dtype=bool)
 
     for k in range(nz):
         bkg, bkg_std = cube[k].background()
@@ -160,13 +165,11 @@ def pad_cube_with_background(cube, target_nx, target_ny, noise_scale=1.0, rng=No
         if padded_mask is not None:
             padded_mask[k, y0:y0 + ny, x0:x0 + nx] = cube.mask[k, :, :]
 
-    if padded_mask is not None:
-        # KNOWN BUG (review #1): the mask is inverted here, so the real data end
-        # up masked and the noise padding unmasked.  Fixed in Phase 2.
-        padded_data = np.ma.array(padded_data, mask=~padded_mask)
-
     cube_padded = Cube(data=padded_data, var=padded_var, wcs=cube.wcs, wave=cube.wave,
                        mask=padded_mask, copy=False)
     if getattr(cube_padded, "wave", None) is None and getattr(cube, "wave", None) is not None:
         cube_padded.wave = cube.wave.copy()
+    hdr = cube_padded.data_header
+    hdr["PADX0"], hdr["PADY0"] = (x0, "x offset of unpadded data (0-based)"), (y0, "y offset of unpadded data")
+    hdr["PADNX"], hdr["PADNY"] = (nx, "x size of unpadded data"), (ny, "y size of unpadded data")
     return cube_padded
