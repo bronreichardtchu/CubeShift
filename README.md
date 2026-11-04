@@ -64,14 +64,19 @@ directly, or add it to `cubeshift.instruments.TELESCOPES`.
 ### Keck/KCWI → JWST/NIRSpec with Milky Way extinction
 
 `scripts/run_kcwi_to_nirspec.py` replaces the old `test_Keck_to_JWST_full_pipeline`. It removes the
-Milky Way extinction at the observed frame, runs the simulation, and puts the extinction back for
-the simulated frame. A_V values are passed as arguments, not typed in at a prompt:
+Milky Way extinction at the observed wavelengths, runs the simulation, and re-applies the *same*
+foreground extinction at the simulated (NIR) wavelengths:
 
 ```bash
 python scripts/run_kcwi_to_nirspec.py cgcg453_red_mosaic.fits --z-obs 0.025 --z-sim 3 \
-    --galaxy CGCG453 --av-obs 0.385 --av-sim 0.072 --noise-scale 0.5 \
+    --galaxy CGCG453 --av <A_V> --noise-scale 0.5 \
     --data-dir /path/to/jwst_files --output-dir Output_cubes
 ```
+
+`--av` is A_V, the V-band extinction towards the galaxy. Take the "Landolt V" row of the
+[NED extinction calculator](https://ned.ipac.caltech.edu/extinction_calculator), or use 3.1·E(B−V).
+Don't use the A_λ of the band nearest your wavelength: the CCM89 law already supplies the
+wavelength dependence.
 
 Other scripts in `scripts/`:
 - `sfr_cgcg453.py`: Hβ/Hγ SFR maps.

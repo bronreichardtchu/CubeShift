@@ -1,22 +1,28 @@
 """Milky Way (foreground) extinction, Cardelli, Clayton & Mathis (1989).
 
-Get A_V for a target from NED's extinction calculator
-(https://ned.ipac.caltech.edu/extinction_calculator), which uses the
-Schlafly & Finkbeiner (2011) recalibration of the SFD (1998) dust map.
-
-Known issues (review #7): only the optical branch (0.3-0.91 um) of CCM is
-implemented, but it is evaluated at NIR wavelengths after redshifting; and the
-old interactive workflow asked for a NED *band* A_lambda which was then used as A_V.
+Use **A_V** (not the A_lambda of some band): from NED's extinction calculator
+(https://ned.ipac.caltech.edu/extinction_calculator) take the "Landolt V" row,
+or A_V = 3.1 * E(B-V).  The foreground dust is the same whatever redshift the
+galaxy is simulated at, so the same A_V is removed at the observed wavelengths
+and re-applied at the simulated ones; the extinction law supplies the
+wavelength dependence.
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
+from .cosmology import scale_cube
 from .io import read_cube
 
 
 def cardelli_A_lambda(lamdas, Av, Rv=3.1):
-    """A_lambda (mag) from the CCM89 optical/NIR polynomial.
+    """A_lambda (mag) from the CCM89 law, valid 0.1-3.3 um (all four branches).
+
+    x = 1/lambda[um]: infrared 0.3-1.1 (power law), optical/NIR 1.1-3.3
+    (polynomial), UV 3.3-8, far-UV 8-10.  Longward of 3.3 um (x < 0.3, e.g.
+    NIRSpec G395) the IR power law is extrapolated, with a warning.
 
     Parameters
     ----------
@@ -27,13 +33,39 @@ def cardelli_A_lambda(lamdas, Av, Rv=3.1):
     Rv : float
         Total-to-selective extinction ratio.
     """
-    lam_um = np.asarray(lamdas) / 1e4
-    y = lam_um ** (-1) - 1.82
-    a_x = (1.0 + 0.17699 * y - 0.50447 * y ** 2 - 0.02427 * y ** 3 +
-           0.72085 * y ** 4 + 0.01979 * y ** 5 - 0.77530 * y ** 6 + 0.32999 * y ** 7)
-    b_x = (1.41338 * y + 2.28305 * y ** 2 + 1.07233 * y ** 3 -
-           5.38434 * y ** 4 - 0.62251 * y ** 5 + 5.30260 * y ** 6 - 2.09002 * y ** 7)
-    return (a_x + b_x / Rv) * Av
+    x = 1e4 / np.atleast_1d(np.asarray(lamdas, dtype=float))
+    if np.any(x > 10):
+        raise ValueError("CCM89 is only defined for lambda > 1000 A")
+    if np.any(x < 0.3):
+        warnings.warn("CCM89 extrapolated beyond 3.3 um (IR power law)", stacklevel=2)
+    a = np.empty_like(x)
+    b = np.empty_like(x)
+
+    ir = x < 1.1
+    a[ir] = 0.574 * x[ir] ** 1.61
+    b[ir] = -0.527 * x[ir] ** 1.61
+
+    opt = (x >= 1.1) & (x < 3.3)
+    y = x[opt] - 1.82
+    a[opt] = (1.0 + 0.17699 * y - 0.50447 * y ** 2 - 0.02427 * y ** 3 +
+              0.72085 * y ** 4 + 0.01979 * y ** 5 - 0.77530 * y ** 6 + 0.32999 * y ** 7)
+    b[opt] = (1.41338 * y + 2.28305 * y ** 2 + 1.07233 * y ** 3 -
+              5.38434 * y ** 4 - 0.62251 * y ** 5 + 5.30260 * y ** 6 - 2.09002 * y ** 7)
+
+    uv = (x >= 3.3) & (x < 8)
+    xu = x[uv]
+    fa = np.where(xu >= 5.9, -0.04473 * (xu - 5.9) ** 2 - 0.009779 * (xu - 5.9) ** 3, 0.0)
+    fb = np.where(xu >= 5.9, 0.2130 * (xu - 5.9) ** 2 + 0.1207 * (xu - 5.9) ** 3, 0.0)
+    a[uv] = 1.752 - 0.316 * xu - 0.104 / ((xu - 4.67) ** 2 + 0.341) + fa
+    b[uv] = -3.090 + 1.825 * xu + 1.206 / ((xu - 4.62) ** 2 + 0.263) + fb
+
+    fuv = x >= 8
+    yf = x[fuv] - 8
+    a[fuv] = -1.073 - 0.628 * yf + 0.137 * yf ** 2 - 0.070 * yf ** 3
+    b[fuv] = 13.670 + 4.257 * yf - 0.420 * yf ** 2 + 0.374 * yf ** 3
+
+    out = (a + b / Rv) * Av
+    return out if np.ndim(lamdas) else out[0]
 
 
 #: Original name in extinctionCorrection.py.
@@ -85,17 +117,12 @@ def milky_way_extinction_correction_cube(cube, Av, undo=False, output_filename=N
     Returns
     -------
     mpdaf.obj.Cube (and A_lambda if ``return_a_lam``)
-        New cube with header keyword EXTCORR set.  Variance is not rescaled.
+        New cube (variance scaled by the factor squared) with header keyword EXTCORR set.
     """
-    from mpdaf.obj import Cube
-
     cube = read_cube(cube)
-    corrected_data, A_lam = milky_way_extinction_correction(cube.wave.coord(), cube.data, Av, undo, Rv)
-
-    corrected_cube = Cube(data=corrected_data, wave=cube.wave, var=cube.var, mask=cube.mask,
-                          wcs=cube.wcs, copy=True)
-    corrected_cube.primary_header = cube.primary_header.copy()
-    corrected_cube.data_header = cube.data_header.copy()
+    A_lam = cardelli_A_lambda(cube.wave.coord(), Av, Rv)
+    factor = 10 ** (0.4 * A_lam)
+    corrected_cube = scale_cube(cube.copy(), 1 / factor if undo else factor)
     corrected_cube.data_header["EXTCORR"] = (not undo, "Milky Way extinction correction applied")
 
     if output_filename is not None:
