@@ -57,6 +57,30 @@ result.disperser     # e.g. 'g235h'
 result.final_path
 ```
 
+### Broadband images (e.g. HST → HST, same filter)
+
+```python
+result = cubeshift.simulate_image_observation(
+    "low8_f555w_drc.fits",              # HST _drz/_drc path, or an mpdaf Image
+    z_obs=0.00048, z_sim=1.0,
+    source_telescope="HST_ACS_WFC", target_telescope="HST_ACS_WFC",
+    distance_obs_mpc=2.0,               # measured distance; recommended for nearby galaxies
+    output_dir="out", galaxy_name="NGC300",
+)
+result.image, result.bin_factors, result.pixel_scale, result.dimming_factor
+```
+
+The image is dimmed, shrunk to the angular scale of z_sim, binned to the target pixels and
+convolved to the target PSF. Pixel values stay in the input units (e.g. electrons/s). Things to
+know:
+- **The filter is not shifted (no K-correction).** The dimming assumes a flat f_ν spectrum by
+  default (`sed="flat_fnu"`, surface brightness ∝ (1+z)⁻³); `sed="flat_flambda"` is the
+  alternative.
+- **Nearby galaxies need a measured distance.** Their redshift is dominated by peculiar velocity,
+  so pass `distance_obs_mpc` (it replaces D_L(z_obs); D_A follows from it).
+- **No noise is added yet** (ROADMAP #8).
+- **Command line:** `scripts/run_hst_image.py` runs several redshifts and writes a quick-look PNG.
+
 To add an instrument, create a `cubeshift.Telescope(...)` (a target needs `fov_x`/`fov_y`) and pass it
 directly, or add it to `cubeshift.instruments.TELESCOPES`.
 
@@ -90,7 +114,8 @@ Each takes `--help`.
 
 | module | contents |
 |---|---|
-| `cubeshift.pipeline` | `simulate_observation`, `SimulationResult` |
+| `cubeshift.pipeline` | `simulate_observation`, `SimulationResult` (IFU cubes) |
+| `cubeshift.imaging` | `simulate_image_observation`, `ImageSimulationResult` (broadband images) |
 | `cubeshift.redshift` | `redshift_wavelength_axis`, `air_to_vac` |
 | `cubeshift.cosmology` | `rescale_flux`, angular/physical scales |
 | `cubeshift.binning` | `bin_data` (sum/mean/median, flux or surface brightness), `bin_list_of_cubes` |

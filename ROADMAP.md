@@ -50,6 +50,14 @@ This needs a decision on which model to use, and the exposure-time inputs.
 **Proposed:** resample onto the exact target grid at z_sim with a flux-conserving drizzle or
 `reproject.reproject_exact`. Propagate the variance, and keep the WCS at the target pixel scale.
 
+**Partly covered bins (decision needed).** A bin with some masked inputs holds the *mean* surface
+brightness of its unmasked pixels × the whole bin area, which extrapolates into the masked part.
+For the NGC 300 ACS `_drc` (7.4% of the frame uncovered, outside the rotated footprint), this adds
+1.5–4.8% to the total counts, depending on z_sim. Options:
+- add a `min_coverage` threshold that masks bins with less coverage;
+- treat uncovered pixels as zero;
+- return a coverage map alongside the output.
+
 ### Other science items
 - **Air vs vacuum.** KCWI wavelengths are in air and NIRSpec's in vacuum, but no conversion is
   applied. `redshift.air_to_vac` exists but isn't used. It also implements Greisen et al. (2006)
