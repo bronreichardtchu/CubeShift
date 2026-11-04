@@ -43,7 +43,8 @@ def _as_telescope(t):
 
 def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope, *,
                          data_dir=None, output_dir=None, galaxy_name=None, save_intermediates=False,
-                         line_rest_wavelength=5007, noise_scale=1.0, rng=None, cosmo=Planck18):
+                         line_rest_wavelength=5007, noise_scale=1.0, rng=None, cosmo=Planck18,
+                         distance_obs_mpc=None):
     """Simulate how a cube would look observed with another telescope at another redshift.
 
     Steps
@@ -84,6 +85,9 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
         Multiplier on the background noise used to pad to the target FOV.
     rng : numpy.random.Generator, optional
         Random generator for the padding noise.
+    distance_obs_mpc : float, optional
+        Measured (luminosity) distance of the observed galaxy in Mpc, used instead
+        of the Hubble-flow distance from z_obs (for very nearby galaxies).
 
     Returns
     -------
@@ -112,8 +116,9 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     _save(redshifted_cube, "redshifted")
 
     # 2. flux dimming;  2b. angular size at z_sim;  3. flux -> surface brightness per z_sim arcsec^2
-    scale_cube(redshifted_cube, flux_dimming_factor(z_obs, z_sim, cosmo=cosmo))
-    redshifted_cube = shrink_to_redshift(redshifted_cube, z_obs, z_sim, cosmo=cosmo)
+    scale_cube(redshifted_cube, flux_dimming_factor(z_obs, z_sim, cosmo=cosmo, distance_obs_mpc=distance_obs_mpc))
+    redshifted_cube = shrink_to_redshift(redshifted_cube, z_obs, z_sim, cosmo=cosmo,
+                                         distance_obs_mpc=distance_obs_mpc)
     scale_cube(redshifted_cube, 1.0 / get_spaxel_area(redshifted_cube))
     _save(redshifted_cube, "fluxscaled")
 
@@ -131,7 +136,7 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
 
     # 7. PSF matching: source seeing (shrunk to z_sim) -> target PSF(lambda)
     cube_psf = convolve_to_match_psf(cube_resampled, source_telescope.spatial_fwhm, target_telescope.psf_fwhm,
-                                     z_obs=z_obs, z_sim=z_sim, cosmo=cosmo)
+                                     z_obs=z_obs, z_sim=z_sim, cosmo=cosmo, distance_obs_mpc=distance_obs_mpc)
     _save(cube_psf, f"{filter_name}_psf")
 
     # 8. disperser: LSF from the source R to the grating's R(lambda) on the fine grid,

@@ -31,7 +31,7 @@ def get_spaxel_area(cube):
 ANGSCALE_KEY = "CSANGSCL"
 
 
-def shrink_to_redshift(cube, z_source, z_target, cosmo=Planck18):
+def shrink_to_redshift(cube, z_source, z_target, cosmo=Planck18, distance_obs_mpc=None):
     """Copy of ``cube`` whose spatial WCS is at the angular scale of z_target.
 
     Every spaxel keeps its physical size, so its angular size shrinks by
@@ -41,7 +41,7 @@ def shrink_to_redshift(cube, z_source, z_target, cosmo=Planck18):
     """
     if ANGSCALE_KEY in cube.data_header:
         raise ValueError(f"cube already shrunk to the simulated redshift ({ANGSCALE_KEY} set)")
-    f_ang = angular_scale_ratio(z_source, z_target, cosmo)
+    f_ang = angular_scale_ratio(z_source, z_target, cosmo, distance_obs_mpc)
     out = cube.copy()
     dy, dx = out.wcs.get_step(unit=u.arcsec)
     out.wcs.set_step([dy * f_ang, dx * f_ang], unit=u.arcsec)
@@ -49,7 +49,8 @@ def shrink_to_redshift(cube, z_source, z_target, cosmo=Planck18):
     return out
 
 
-def resampling_factors(cube, target_telescope, z_source=None, z_target=None, cosmo=Planck18):
+def resampling_factors(cube, target_telescope, z_source=None, z_target=None, cosmo=Planck18,
+                       distance_obs_mpc=None):
     """Raw (non-integer) spatial binning factors (s_x, s_y) = p_target / p_cube(z_target).
 
     If the cube's WCS is still at the source angular scale (no ``CSANGSCL``
@@ -61,13 +62,14 @@ def resampling_factors(cube, target_telescope, z_source=None, z_target=None, cos
     if ANGSCALE_KEY not in cube.data_header:
         if z_source is None or z_target is None:
             raise ValueError("cube is at the source angular scale; z_source and z_target are needed")
-        f_ang = angular_scale_ratio(z_source, z_target, cosmo)
+        f_ang = angular_scale_ratio(z_source, z_target, cosmo, distance_obs_mpc)
         dx, dy = dx * f_ang, dy * f_ang
     return target_telescope.pixel_scale_x / dx, target_telescope.pixel_scale_y / dy
 
 
 def resample_cube_to_telescope_and_redshift(cube, target_telescope, z_source, z_target, trim=True,
-                                            noise_scale=1.0, rng=None, cosmo=Planck18):
+                                            noise_scale=1.0, rng=None, cosmo=Planck18,
+                                            distance_obs_mpc=None, pad_to_fov=True):
     """Bin a cube to the target telescope's spaxels at z_target, then pad to its FOV.
 
     Expects surface-brightness data (the binning averages the summed pixels).
@@ -82,11 +84,16 @@ def resample_cube_to_telescope_and_redshift(cube, target_telescope, z_source, z_
     ----------
     cube : mpdaf.obj.Cube
     target_telescope : cubeshift.instruments.Telescope
-        Must define ``fov_x``/``fov_y``.
+        Must define ``fov_x``/``fov_y`` if ``pad_to_fov``.
     z_source, z_target : float
         Observed and simulated redshift.
     trim : bool
-        Remove all-NaN spatial borders after binning.
+        Remove empty (all NaN or masked) spatial borders after binning.
+    pad_to_fov : bool
+        Pad with background noise to the target field of view (if smaller).
+    distance_obs_mpc : float, optional
+        Distance of the observed galaxy, overriding z_source for D_A
+        (see :mod:`cubeshift.cosmology`).
     noise_scale : float
         Multiplier on the background standard deviation used for the padding
         noise (the original code used 0.5 for CGCG453).
@@ -105,7 +112,7 @@ def resample_cube_to_telescope_and_redshift(cube, target_telescope, z_source, z_
     """
     if ANGSCALE_KEY not in cube.data_header:
         # surface brightness per source arcsec^2 -> per z_target arcsec^2
-        cube = shrink_to_redshift(cube, z_source, z_target, cosmo)
+        cube = shrink_to_redshift(cube, z_source, z_target, cosmo, distance_obs_mpc)
         f2 = cube.data_header[ANGSCALE_KEY] ** 2
         cube.data = cube.data / f2
         if cube.var is not None:
@@ -126,11 +133,14 @@ def resample_cube_to_telescope_and_redshift(cube, target_telescope, z_source, z_
 
     dx_arcsec_new, dy_arcsec_new = pixel_scale_xy(cube_binned)
 
-    target_nx = int(np.round(target_telescope.fov_x / target_telescope.pixel_scale_x))
-    target_ny = int(np.round(target_telescope.fov_y / target_telescope.pixel_scale_y))
-
-    needs_pad_x = nx_binned < target_nx
-    needs_pad_y = ny_binned < target_ny
+    needs_pad_x = needs_pad_y = False
+    if pad_to_fov:
+        if target_telescope.fov_x is None or target_telescope.fov_y is None:
+            raise ValueError(f"{target_telescope.name} has no fov_x/fov_y; pass pad_to_fov=False")
+        target_nx = int(np.round(target_telescope.fov_x / target_telescope.pixel_scale_x))
+        target_ny = int(np.round(target_telescope.fov_y / target_telescope.pixel_scale_y))
+        needs_pad_x = nx_binned < target_nx
+        needs_pad_y = ny_binned < target_ny
     if needs_pad_x or needs_pad_y:
         cube_resampled = pad_cube_with_background(
             cube_binned,
