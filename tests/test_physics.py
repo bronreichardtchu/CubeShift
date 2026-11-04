@@ -66,12 +66,26 @@ def test_spatial_resampling_conserves_flux(quiet):
     assert galaxy / tot0 == pytest.approx(dl2, rel=0.01)
 
 
-@pytest.mark.xfail(strict=True, reason="review #3: WCS stays at the source-frame scale after binning")
 def test_wcs_is_at_simulated_angular_scale(quiet):
+    """Review #3: the WCS used to stay at the source-frame scale (1.45"/spaxel instead of 0.096")."""
     _, cr, bf, _, _ = _spatial_chain(quiet)
     f_ang = cosmology.angular_scale_ratio(Z_OBS, Z_SIM)
     expected = bf[0] * 0.29 * f_ang
     assert np.abs(cr.wcs.get_step(unit="arcsec")) == pytest.approx([expected, expected], rel=0.01)
+
+
+def test_surface_brightness_dimming():
+    """Integrated SB per true arcsec^2 dims as (1+z)^-4 (pipeline steps 1-3)."""
+    cube = make_test_cube()
+    sb0 = np.nansum(cube.data) * cube.wave.get_step() / (cube.shape[1] * cube.shape[2] * 0.29 ** 2)
+    rc, _ = redshift_wavelength_axis(cube, Z_OBS, Z_SIM)
+    rc.data = cosmology.rescale_flux(rc.data, Z_OBS, Z_SIM)
+    rc = resample.shrink_to_redshift(rc, Z_OBS, Z_SIM)
+    rc.data = rc.data / resample.get_spaxel_area(rc)
+    sb1 = np.nansum(rc.data) * rc.wave.get_step() / (rc.shape[1] * rc.shape[2])
+    assert sb1 / sb0 == pytest.approx(((1 + Z_OBS) / (1 + Z_SIM)) ** 4, rel=1e-6)
+    with pytest.raises(ValueError):
+        resample.shrink_to_redshift(rc, Z_OBS, Z_SIM)
 
 
 def test_rectangular_target_spaxels(quiet):

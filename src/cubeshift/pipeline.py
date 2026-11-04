@@ -11,7 +11,7 @@ from .cosmology import rescale_flux
 from .instruments import TELESCOPES, Telescope
 from .psf import convolve_to_match_psf
 from .redshift import redshift_wavelength_axis
-from .resample import get_spaxel_area, resample_cube_to_telescope_and_redshift
+from .resample import get_spaxel_area, resample_cube_to_telescope_and_redshift, shrink_to_redshift
 from .spectral import apply_dispersion_pipeline, resample_spectral_axis
 from .throughput import apply_transmission_filter
 
@@ -50,8 +50,9 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     Steps
     -----
     1. Redshift the wavelength axis.
-    2. Dim the flux densities (luminosity distance and (1+z)).
-    3. Convert flux to surface brightness.
+    2. Dim the flux densities (luminosity distance and (1+z)), and shrink the
+       spatial WCS to the angular scale of z_sim (D_A(z_obs)/D_A(z_sim)).
+    3. Convert flux to surface brightness (per arcsec^2 at z_sim).
     4. Apply the NIRSpec filter throughput for ``line_rest_wavelength``.
     5. Bin to the target spaxels at z_sim and pad to the target FOV.
     6. Convert back to flux per (new) spaxel.
@@ -114,8 +115,9 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     redshifted_cube, _ = redshift_wavelength_axis(cube, z_obs, z_sim)
     _save(redshifted_cube, "redshifted")
 
-    # 2. flux dimming;  3. flux -> surface brightness
+    # 2. flux dimming;  2b. angular size at z_sim;  3. flux -> surface brightness per z_sim arcsec^2
     redshifted_cube.data = rescale_flux(redshifted_cube.data, z_obs, z_sim, cosmo=cosmo)
+    redshifted_cube = shrink_to_redshift(redshifted_cube, z_obs, z_sim, cosmo=cosmo)
     redshifted_cube.data = redshifted_cube.data / get_spaxel_area(redshifted_cube)
     _save(redshifted_cube, "fluxscaled")
 
@@ -127,7 +129,7 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     cube_resampled, bin_factors, _, dx_arcsec, dy_arcsec = resample_cube_to_telescope_and_redshift(
         transmission_cube, target_telescope, z_obs, z_sim, noise_scale=noise_scale, rng=rng, cosmo=cosmo)
 
-    # 6. surface brightness -> flux.  Known issue (review #2): masked spaxels are skipped.
+    # 6. surface brightness -> flux per binned spaxel (masked spaxels stay masked)
     cube_resampled.data = cube_resampled.data * get_spaxel_area(cube_resampled)
     _save(cube_resampled, "rebinned_fluxscaled")
 

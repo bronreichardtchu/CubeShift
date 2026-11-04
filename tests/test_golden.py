@@ -64,6 +64,7 @@ def test_pipeline_chain(golden_chain, mock_data_dir, quiet):
     assert_matches(rc, g, "s1_redshift_")
 
     rc.data = cosmology.rescale_flux(rc.data, Z_OBS, Z_SIM)
+    rc = resample.shrink_to_redshift(rc, Z_OBS, Z_SIM)
     rc.data = rc.data / resample.get_spaxel_area(rc)
     assert_matches(rc, g, "s3_sb_")
 

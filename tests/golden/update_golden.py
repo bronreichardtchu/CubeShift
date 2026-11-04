@@ -48,6 +48,7 @@ def chain(data_dir):
         rc, _ = redshift_wavelength_axis(make_test_cube(), Z_OBS, Z_SIM)
     res.update(snap(rc, "s1_redshift_"))
     rc.data = cosmology.rescale_flux(rc.data, Z_OBS, Z_SIM)
+    rc = resample.shrink_to_redshift(rc, Z_OBS, Z_SIM)
     rc.data = rc.data / resample.get_spaxel_area(rc)
     res.update(snap(rc, "s3_sb_"))
     with quiet():
