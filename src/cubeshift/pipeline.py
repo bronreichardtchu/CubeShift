@@ -56,7 +56,8 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     4. Apply the NIRSpec filter throughput for ``line_rest_wavelength``.
     5. Bin to the target spaxels at z_sim and pad to the target FOV.
     6. Convert back to flux per (new) spaxel.
-    7. Convolve to the target PSF.
+    7. Convolve from the source PSF (``source_telescope.spatial_fwhm``, shrunk to
+       z_sim) to the target PSF (``target_telescope.psf_fwhm(lambda)``).
     8. Choose a disperser, resample onto its grid and match its resolution.
     9. Resample to the target spectral sampling (lambda/R).
 
@@ -87,11 +88,6 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     Returns
     -------
     SimulationResult
-
-    Notes
-    -----
-    ``source_telescope`` is not used yet (review #4: the source PSF should enter
-    the PSF matching).
     """
     source_telescope = _as_telescope(source_telescope)
     target_telescope = _as_telescope(target_telescope)
@@ -126,16 +122,15 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
         redshifted_cube, z_sim, line_rest_wavelength, data_dir=data_dir)
 
     # 5. spatial binning + FOV padding
-    cube_resampled, bin_factors, _, dx_arcsec, dy_arcsec = resample_cube_to_telescope_and_redshift(
+    cube_resampled, bin_factors, _, _, _ = resample_cube_to_telescope_and_redshift(
         transmission_cube, target_telescope, z_obs, z_sim, noise_scale=noise_scale, rng=rng, cosmo=cosmo)
 
     # 6. surface brightness -> flux per binned spaxel (masked spaxels stay masked)
     cube_resampled.data = cube_resampled.data * get_spaxel_area(cube_resampled)
     _save(cube_resampled, "rebinned_fluxscaled")
 
-    # 7. PSF matching.  Known issue (review #4): the pixel scale is passed as the source FWHM.
-    cube_psf = convolve_to_match_psf(cube_resampled, dx_arcsec, dy_arcsec,
-                                     fwhm_target_arcsec=target_telescope.spatial_fwhm,
+    # 7. PSF matching: source seeing (shrunk to z_sim) -> target PSF(lambda)
+    cube_psf = convolve_to_match_psf(cube_resampled, source_telescope.spatial_fwhm, target_telescope.psf_fwhm,
                                      z_obs=z_obs, z_sim=z_sim, cosmo=cosmo)
     _save(cube_psf, f"{filter_name}_psf")
 

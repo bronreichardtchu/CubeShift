@@ -18,10 +18,14 @@ class Telescope:
         Field of view in arcsec (needed when resampling to this instrument).
     spectral_sampling : float, optional
         Wavelength step in Angstrom.
+    mirror_diameter : float, optional
+        Primary mirror diameter in metres.  If given, the instrument is treated
+        as diffraction limited: :meth:`psf_fwhm` = 1.025 lambda / D (an
+        idealised lower bound; the delivered IFU PSF is broader).
     """
 
     def __init__(self, name, spatial_fwhm, pixel_scale_x, pixel_scale_y, spectral_resolution,
-                 fov_x=None, fov_y=None, spectral_sampling=None):
+                 fov_x=None, fov_y=None, spectral_sampling=None, mirror_diameter=None):
         self.name = name
         self.spatial_fwhm = spatial_fwhm
         self.pixel_scale_x = pixel_scale_x
@@ -30,6 +34,20 @@ class Telescope:
         self.fov_x = fov_x
         self.fov_y = fov_y
         self.spectral_sampling = spectral_sampling
+        self.mirror_diameter = mirror_diameter
+
+    def psf_fwhm(self, wavelength_angstrom):
+        """PSF FWHM in arcsec at the given wavelength(s) (Angstrom).
+
+        Diffraction limit 1.025 lambda/D if ``mirror_diameter`` is set, otherwise
+        the constant ``spatial_fwhm`` (e.g. seeing).
+        """
+        import numpy as np
+
+        lam = np.asarray(wavelength_angstrom, dtype=float)
+        if self.mirror_diameter is None:
+            return np.full_like(lam, self.spatial_fwhm)
+        return np.degrees(1.025 * lam * 1e-10 / self.mirror_diameter) * 3600.0
 
     def __repr__(self):
         return (f"Telescope({self.name!r}, pixel={self.pixel_scale_x}x{self.pixel_scale_y}\", "
@@ -45,6 +63,7 @@ TELESCOPES = {
         pixel_scale_y=0.063,
         spatial_fwhm=0.07,          # around F200W
         spectral_resolution=1000,
+        mirror_diameter=6.5,
     ),
     "VLT_MUSE": Telescope(
         name="VLT MUSE",
@@ -58,11 +77,12 @@ TELESCOPES = {
         name="JWST NIRSpec",
         pixel_scale_x=0.1,          # native IFU spaxel
         pixel_scale_y=0.1,
-        spatial_fwhm=0.07,
+        spatial_fwhm=0.07,          # nominal; psf_fwhm() uses the diffraction limit
         spectral_resolution=1000,   # medium-resolution gratings (R~1000-2700)
         fov_x=3.0,
         fov_y=3.0,
         spectral_sampling=2.0,
+        mirror_diameter=6.5,
     ),
     "Keck_KCWI": Telescope(
         name="Keck KCWI",

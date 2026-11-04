@@ -37,7 +37,7 @@ def test_bin_data_matches_cubeshift_bin_data(golden_units, method):
 def test_units(golden_units, quiet):
     small = _small()
     with quiet():
-        assert_matches(psf.convolve_to_match_psf(small, 0.29, 0.29, 0.5, 0.0, 0.0), golden_units, "psf_conv_")
+        assert_matches(psf.convolve_to_match_psf(small, 0.3, 1.0, 0.025, 0.025), golden_units, "psf_conv_")
         assert_matches(spectral.resample_spectral_axis(small, np.arange(4955.0, 4965.0, 0.3)),
                        golden_units, "resample_spec_")
         w = small.wave.coord()
@@ -85,7 +85,7 @@ def test_pipeline_chain(golden_chain, mock_data_dir, quiet):
     assert_matches(cr, g, "s6_flux_", rtol=1e-6)
 
     with quiet():
-        cp = psf.convolve_to_match_psf(cr, dx, dy, nirspec.spatial_fwhm, Z_OBS, Z_SIM)
+        cp = psf.convolve_to_match_psf(cr, TELESCOPES["Keck_KCWI"].spatial_fwhm, nirspec.psf_fwhm, Z_OBS, Z_SIM)
     assert_matches(cp, g, "s7_psf_", rtol=1e-6)
 
     with quiet():

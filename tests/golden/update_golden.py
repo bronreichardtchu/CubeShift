@@ -64,7 +64,7 @@ def chain(data_dir):
     cr.data = cr.data * resample.get_spaxel_area(cr)
     res.update(snap(cr, "s6_flux_"))
     with quiet():
-        cp = psf.convolve_to_match_psf(cr, dx, dy, nirspec.spatial_fwhm, Z_OBS, Z_SIM)
+        cp = psf.convolve_to_match_psf(cr, TELESCOPES["Keck_KCWI"].spatial_fwhm, nirspec.psf_fwhm, Z_OBS, Z_SIM)
     res.update(snap(cp, "s7_psf_"))
     with quiet():
         bl, disp = spectral.apply_dispersion_pipeline(cp, data_dir=data_dir)
@@ -87,7 +87,7 @@ def units():
                 b = binning.bin_data(3, 2, small, method=method, surface_brightness=sb)
             unit.update(snap(b, f"bin_cube_{method}_{int(sb)}_"))
     with quiet():
-        unit.update(snap(psf.convolve_to_match_psf(small, 0.29, 0.29, 0.5, 0.0, 0.0), "psf_conv_"))
+        unit.update(snap(psf.convolve_to_match_psf(small, 0.3, 1.0, 0.025, 0.025), "psf_conv_"))
         unit.update(snap(spectral.resample_spectral_axis(small, np.arange(4955.0, 4965.0, 0.3)), "resample_spec_"))
         w = small.wave.coord()
         unit.update(snap(spectral.precomputed_match_spectral_resolution_variable_kernel(

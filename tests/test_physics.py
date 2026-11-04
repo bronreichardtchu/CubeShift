@@ -74,6 +74,53 @@ def test_wcs_is_at_simulated_angular_scale(quiet):
     assert np.abs(cr.wcs.get_step(unit="arcsec")) == pytest.approx([expected, expected], rel=0.01)
 
 
+def _second_moment_fwhm(img, pix):
+    _, x = np.indices(img.shape)
+    tot = img.sum()
+    xc = (img * x).sum() / tot
+    sx2 = (img * (x - xc) ** 2).sum() / tot
+    return 2.3548 * np.sqrt(sx2) * pix
+
+
+def test_psf_matches_target_at_each_wavelength(quiet):
+    """Review #4: source seeing (shrunk to z_sim) is convolved up to the target's PSF(lambda)."""
+    from mpdaf.obj import WCS, Cube, WaveCoord
+
+    from cubeshift.psf import convolve_to_match_psf
+
+    seeing = 0.5                                   # arcsec at z_obs
+    f_ang = cosmology.angular_scale_ratio(Z_OBS, Z_SIM)
+    pix = 0.004                                    # fine grid, arcsec at z_sim
+    n = 121
+    yy, xx = np.indices((n, n)) - (n - 1) / 2
+    sig = seeing * f_ang / 2.3548 / pix
+    img = np.exp(-(xx ** 2 + yy ** 2) / (2 * sig ** 2))
+    wave = WaveCoord(crval=17000.0, cdelt=12000.0, crpix=1, cunit="Angstrom")   # 1.7 and 2.9 um
+    cube = Cube(data=np.stack([img, img]), wave=wave,
+                wcs=WCS(crval=(0, 0), cdelt=(pix / 3600, -pix / 3600), shape=(n, n), deg=True))
+    with quiet():
+        out = convolve_to_match_psf(cube, seeing, NIRSPEC.psf_fwhm, Z_OBS, Z_SIM)
+    for i, lam in enumerate(cube.wave.coord()):
+        assert _second_moment_fwhm(np.asarray(out.data[i]), pix) == pytest.approx(
+            NIRSPEC.psf_fwhm(lam), rel=0.02)
+
+
+def test_pipeline_uses_source_seeing(mock_data_dir, quiet):
+    """Review #4: the pipeline used to pass the pixel scale as the source PSF."""
+    from cubeshift import simulate_observation
+
+    sharp = Telescope("sharp", spatial_fwhm=0.1, pixel_scale_x=0.29, pixel_scale_y=0.29, spectral_resolution=4000)
+    blurry = Telescope("blurry", spatial_fwhm=2.0, pixel_scale_x=0.29, pixel_scale_y=0.29, spectral_resolution=4000)
+    out = {}
+    for t in (sharp, blurry):
+        np.random.seed(0)
+        with quiet():
+            out[t.name] = simulate_observation(make_test_cube(), Z_OBS, Z_SIM, t, "JWST_NIRSpec",
+                                               data_dir=mock_data_dir).cube
+    # 2" seeing shrinks to 0.13" > NIRSpec PSF: no extra blur; 0.1" -> 0.0066": convolved
+    assert not np.allclose(out["sharp"].data, out["blurry"].data, rtol=1e-3, atol=0)
+
+
 def test_surface_brightness_dimming():
     """Integrated SB per true arcsec^2 dims as (1+z)^-4 (pipeline steps 1-3)."""
     cube = make_test_cube()
