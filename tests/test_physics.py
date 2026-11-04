@@ -74,8 +74,8 @@ def test_wcs_is_at_simulated_angular_scale(quiet):
     assert np.abs(cr.wcs.get_step(unit="arcsec")) == pytest.approx([expected, expected], rel=0.01)
 
 
-@pytest.mark.xfail(strict=True, reason="review #13: bin factors swapped for rectangular target spaxels")
 def test_rectangular_target_spaxels(quiet):
+    """Review #13: x/y were swapped twice (cancelling only for square spaxels)."""
     rect = Telescope("rect", spatial_fwhm=0.07, pixel_scale_x=0.1, pixel_scale_y=0.2,
                      spectral_resolution=1000, fov_x=3.0, fov_y=3.0)
     _, cr, bf, _, _ = _spatial_chain(quiet, target=rect)

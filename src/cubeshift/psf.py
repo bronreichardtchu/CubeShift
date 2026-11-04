@@ -52,7 +52,8 @@ def convolve_to_match_psf(cube, fwhm_real_x_arcsec, fwhm_real_y_arcsec, fwhm_tar
     sigma_x_arcsec = fwhm_kernel_x / 2.355
     sigma_y_arcsec = fwhm_kernel_y / 2.355
 
-    dx_arcsec, dy_arcsec = cube.wcs.get_axis_increments(unit=u.arcsec)
+    # mpdaf returns (dy, dx), and dx is negative for RA
+    dy_arcsec, dx_arcsec = np.abs(cube.wcs.get_axis_increments(unit=u.arcsec))
     sigma_x_pix = sigma_x_arcsec / dx_arcsec
     sigma_y_pix = sigma_y_arcsec / dy_arcsec
 

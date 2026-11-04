@@ -11,10 +11,20 @@ from .cosmology import angular_scale_ratio
 from .cropping import trim_empty_edges
 
 
+def pixel_scale_xy(cube):
+    """(dx, dy) spaxel size in arcsec, both positive.
+
+    mpdaf's ``wcs.get_step`` returns (dy, dx) in numpy axis order; this helper
+    exists so callers can't unpack it the wrong way round.
+    """
+    dy, dx = cube.wcs.get_step(unit="arcsec")
+    return float(abs(dx)), float(abs(dy))
+
+
 def get_spaxel_area(cube):
     """Spaxel area in arcsec**2 from the cube's WCS."""
-    dx_arcsec, dy_arcsec = cube.wcs.get_step(unit="arcsec")
-    return abs(dx_arcsec * dy_arcsec)
+    dx_arcsec, dy_arcsec = pixel_scale_xy(cube)
+    return dx_arcsec * dy_arcsec
 
 
 def resampling_factors(cube, target_telescope, z_source, z_target, scaling="Giavalisco", cosmo=Planck18):
@@ -27,9 +37,7 @@ def resampling_factors(cube, target_telescope, z_source, z_target, scaling="Giav
         'Giavalisco': s = (1+z_src)**2/(1+z_tgt)**2 * D_L(z_tgt)/D_L(z_src) * p_target / p_src,
         which equals p_target / (p_src * D_A(z_src)/D_A(z_tgt)).
     """
-    # KNOWN BUG (review #13): mpdaf get_step returns (dy, dx) but is unpacked as
-    # (dx, dy).  Harmless for square spaxels; kept to preserve outputs.
-    dx_arcsec_src, dy_arcsec_src = (float(abs(s)) for s in cube.wcs.get_step(unit="arcsec"))
+    dx_arcsec_src, dy_arcsec_src = pixel_scale_xy(cube)
 
     scaling = scaling.lower()
     if scaling == "da":
@@ -90,16 +98,14 @@ def resample_cube_to_telescope_and_redshift(cube, target_telescope, z_source, z_
     bin_factor_y = max(1, int(round(s_y)))
     print(f"Integer bin factors: {bin_factor_x}, {bin_factor_y}")
 
-    # KNOWN BUG (review #13): bin_data takes (x, y) but is given (y, x).
-    # Harmless for square bins; fixed in Phase 2.
-    cube_binned = bin_data(bin_factor_y, bin_factor_x, cube, surface_brightness=True)
+    cube_binned = bin_data(bin_factor_x, bin_factor_y, cube, surface_brightness=True)
 
     if trim:
         cube_binned = trim_empty_edges(cube_binned)
 
     ny_binned, nx_binned = cube_binned.shape[1], cube_binned.shape[2]
 
-    dx_arcsec_new, dy_arcsec_new = (float(abs(s)) for s in cube_binned.wcs.get_step(unit="arcsec"))
+    dx_arcsec_new, dy_arcsec_new = pixel_scale_xy(cube_binned)
 
     target_nx = int(np.round(target_telescope.fov_x / target_telescope.pixel_scale_x))
     target_ny = int(np.round(target_telescope.fov_y / target_telescope.pixel_scale_y))
