@@ -8,10 +8,9 @@ same galaxy were observed at a higher redshift with a different instrument (curr
 the new angular scale, pads to the target field of view, matches the PSF and spectral resolution,
 and resamples onto the target wavelength grid.
 
-> **Status:** the code was recently reorganised into a single package with no intended change to
-> its outputs. The known science issues from the code review are listed as expected failures in
-> `tests/test_physics.py` and are being fixed one at a time. Treat simulated cubes as provisional
-> until those tests pass.
+> **Status:** the critical issues from the code review are fixed (flux, angular scale, PSF and
+> spectral resolution matching, extinction, variance). There is **no noise model yet**, and the
+> NIRSpec filter/grating choice still needs work. See [ROADMAP.md](ROADMAP.md) for the open items.
 
 ## Installation
 
