@@ -85,7 +85,7 @@ def main(argv=None):
     parser.add_argument("cube", help="Pipeline output cube (FITS)")
     parser.add_argument("--z-sim", type=float, default=3.0, help="Redshift of the simulated cube (default 3)")
     parser.add_argument("--av", type=float, required=True,
-                        help="Milky Way A_V (mag) at the cube's central wavelength, from NED")
+                        help="Milky Way A_V (mag) towards the galaxy (NED 'Landolt V' row, or 3.1*E(B-V))")
     parser.add_argument("--galaxy-name", default="CGCG453")
     parser.add_argument("--mw-output", default=None, help="Optional path to save the MW-corrected cube")
     parser.add_argument("--calibration", default="reichardtchu2025", choices=sorted(CALIBRATIONS))

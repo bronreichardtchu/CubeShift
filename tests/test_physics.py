@@ -207,10 +207,25 @@ def test_final_spectral_resampling_conserves_line_flux(quiet):
         assert f_out / f_in == pytest.approx(1.0, rel=1e-6)
 
 
-@pytest.mark.xfail(strict=True, reason="review #7: CCM optical polynomial used in the NIR")
 def test_ccm_infrared_branch():
+    """Review #7: the optical polynomial was used in the NIR (A/A_V = 4.8 at 2 um)."""
     # CCM89 IR branch at 2 um: A/A_V = (0.574 - 0.527/3.1) * 0.5**1.61 = 0.132
-    assert extinction.cardelli_A_lambda(np.array([20000.0]), Av=1.0)[0] == pytest.approx(0.132, abs=0.005)
+    assert extinction.cardelli_A_lambda(np.array([20000.0]), Av=1.0)[0] == pytest.approx(0.132, abs=0.001)
+
+
+def test_ccm_law_shape():
+    """A_V normalisation, continuity at the branch boundaries, and the 2175 A bump."""
+    ccm = extinction.cardelli_A_lambda
+    assert ccm(5494.5, Av=1.0) == pytest.approx(1.0, abs=0.01)          # V band
+    for x in (1.1, 3.3, 8.0):                                            # branch edges (1/um)
+        lo, hi = ccm(1e4 / (x - 1e-6), 1.0), ccm(1e4 / (x + 1e-6), 1.0)
+        assert lo == pytest.approx(hi, rel=0.02)
+    lam = np.linspace(1800, 2600, 200)
+    assert 2100 < lam[np.argmax(ccm(lam, 1.0))] < 2250                   # UV bump
+    with pytest.raises(ValueError):
+        ccm(900.0, 1.0)
+    with pytest.warns(UserWarning):
+        ccm(40000.0, 1.0)
 
 
 def test_variance_survives_pipeline(mock_data_dir, quiet):
