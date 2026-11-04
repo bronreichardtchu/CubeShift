@@ -67,14 +67,10 @@ def chain(data_dir):
         cp = psf.convolve_to_match_psf(cr, TELESCOPES["Keck_KCWI"].spatial_fwhm, nirspec.psf_fwhm, Z_OBS, Z_SIM)
     res.update(snap(cp, "s7_psf_"))
     with quiet():
-        bl, disp = spectral.apply_dispersion_pipeline(cp, data_dir=data_dir)
-    res.update(snap(bl, "s8_disp_"))
+        bl, disp = spectral.apply_dispersion_pipeline(
+            cp, source_resolution=TELESCOPES["Keck_KCWI"].spectral_resolution, data_dir=data_dir)
+    res.update(snap(bl, "s8_disp_"))   # final cube (the old step 9 was removed)
     res["s8_disperser"] = np.array(disp)
-    w = bl.wave.coord()
-    bw = np.median(w) / nirspec.spectral_resolution
-    with quiet():
-        fin = spectral.resample_spectral_axis(bl, np.arange(w[0], w[-1] + bw, bw))
-    res.update(snap(fin, "s9_final_"))
     return res
 
 
@@ -89,9 +85,7 @@ def units():
     with quiet():
         unit.update(snap(psf.convolve_to_match_psf(small, 0.3, 1.0, 0.025, 0.025), "psf_conv_"))
         unit.update(snap(spectral.resample_spectral_axis(small, np.arange(4955.0, 4965.0, 0.3)), "resample_spec_"))
-        w = small.wave.coord()
-        unit.update(snap(spectral.precomputed_match_spectral_resolution_variable_kernel(
-            small[:, :4, :4], np.full(w.size, 4000.0), 1500.0), "lsf_kernel_"))
+        unit.update(snap(spectral.match_spectral_resolution(small[:, :4, :4], 1500.0, 4000.0), "lsf_kernel_"))
         unit.update(snap(spectral.crop_cube_to_wavelength_range(small, 4960.0, 4965.0), "crop_wave_"))
     unit["rescale_flux"] = cosmology.rescale_flux(np.ones(3), 0.025, 3.0)
     with quiet():

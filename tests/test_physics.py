@@ -145,20 +145,54 @@ def test_rectangular_target_spaxels(quiet):
     assert dy / dx == pytest.approx(bf[1] / bf[0])
 
 
-@pytest.mark.xfail(strict=True, reason="review #5: LSF matching ignores the source resolution")
 def test_lsf_matches_nirspec_resolution(mock_data_dir, quiet):
-    """Unresolved KCWI line (R=4000) observed with G235H (R~2345 at 2.05um) -> FWHM ~9 A."""
-    c = make_test_cube(line_sigma=0.6)[:, 12:18, 12:18]
+    """Review #5: KCWI line (R=4000) observed with G235H (mock R=2291 at 2.0027um).
+
+    FWHM_out^2 = FWHM_in^2 + (lam/R_N)^2 - (lam/R_src)^2 = 5.51^2 + 8.74^2 - 5.01^2 -> 9.04 A,
+    plus the 1.95 A pixel the kernel is integrated over (exact check on the fine grid).
+    After rebinning to the 3.96 A disperser pixels (~2.3 px per FWHM) a Gaussian fit reads
+    ~9.7 A.  The old code used R_NIRSpec as the *input* resolution: the line stayed at 5.5 A.
+    """
+    c = make_test_cube(line_sigma=0.6, continuum=0.0)[:, 12:18, 12:18]
     with quiet():
         rc, _ = redshift_wavelength_axis(c, Z_OBS, Z_SIM)
-        bl, _ = spectral.apply_dispersion_pipeline(rc, data_dir=mock_data_dir)
-    sp = np.nansum(np.asarray(bl.data), axis=(1, 2))
-    fit = fit_gaussian_line(bl.wave.coord(), sp, center=5006.84 * 4, window=60)
-    assert fit["fwhm"] == pytest.approx(9.0, abs=1.0)
+    lam0 = 5006.84 * (1 + Z_SIM)
+    wave = rc.wave.coord()
+    fwhm_in = fit_gaussian_line(wave, np.nansum(np.asarray(rc.data), axis=(1, 2)), lam0, 60)["fwhm"]
+    R_n = lambda lam: 2700 * lam / 23600.0                     # the mock G235H table
+    expected = np.sqrt(fwhm_in ** 2 + (lam0 / R_n(lam0)) ** 2 - (lam0 / 4000) ** 2)
+
+    fine = spectral.match_spectral_resolution(rc, R_n, 4000)
+    pix_box = 2.3548 * np.diff(wave)[0] / np.sqrt(12)
+    fit = fit_gaussian_line(wave, np.nansum(np.asarray(fine.data), axis=(1, 2)), lam0, 60)
+    assert fit["fwhm"] == pytest.approx(np.hypot(expected, pix_box), rel=0.005)
+
+    with quiet():
+        bl, _ = spectral.apply_dispersion_pipeline(rc, source_resolution=4000, data_dir=mock_data_dir)
+    fit = fit_gaussian_line(bl.wave.coord(), np.nansum(np.asarray(bl.data), axis=(1, 2)), lam0, 60)
+    assert 9.0 < fit["fwhm"] < 10.0
 
 
-@pytest.mark.xfail(strict=True, reason="review #6: final spectral resampling is point sampling at lambda/1000")
+def test_lsf_operator_width_and_flux():
+    """A delta-like line convolved to R=2000 has FWHM lambda/2000; flux and edges are conserved."""
+    from mpdaf.obj import Cube, WaveCoord
+
+    wave = WaveCoord(crval=19000.0, cdelt=0.5, crpix=1, cunit="Angstrom")
+    lam = 19000.0 + 0.5 * np.arange(4000)
+    data = np.exp(-0.5 * ((lam - 20000.0) / 0.3) ** 2)[:, None, None] * np.ones((1, 2, 2))
+    data[0] = 5.0                                   # spike at the band edge must not wrap around
+    c = Cube(data=data, var=np.ones_like(data), wave=wave)
+    out = spectral.match_spectral_resolution(c, 2000.0)
+    fit = fit_gaussian_line(lam, out.data[:, 0, 0], center=20000.0, window=60)
+    assert fit["fwhm"] == pytest.approx(np.sqrt((20000 / 2000) ** 2 + (0.3 * 2.3548) ** 2), rel=0.01)
+    line = np.abs(lam - 20000) < 100
+    assert out.data[line, 0, 0].sum() == pytest.approx(data[line, 0, 0].sum(), rel=1e-6)
+    assert np.all(out.data[-200:, 0, 0] < 1e-12)    # no wrap-around from the edge spike
+    assert out.var is not None and np.all(out.var[line] < 1)   # smoothing lowers per-pixel variance
+
+
 def test_final_spectral_resampling_conserves_line_flux(quiet):
+    """Review #6: point-sampling onto a lambda/1000 grid gave 0.03-2.4x the line flux."""
     c = make_test_cube(line_sigma=0.6, continuum=0.0)[:, 14:16, 14:16]
     with quiet():
         rc, _ = redshift_wavelength_axis(c, Z_OBS, Z_SIM)
@@ -170,7 +204,7 @@ def test_final_spectral_resampling_conserves_line_flux(quiet):
             out = spectral.resample_spectral_axis(rc, grid)
         f_in = np.nansum(rc.data) * rc.wave.get_step()
         f_out = np.nansum(out.data) * out.wave.get_step()
-        assert f_out / f_in == pytest.approx(1.0, rel=0.05)
+        assert f_out / f_in == pytest.approx(1.0, rel=1e-6)
 
 
 @pytest.mark.xfail(strict=True, reason="review #7: CCM optical polynomial used in the NIR")
@@ -179,8 +213,8 @@ def test_ccm_infrared_branch():
     assert extinction.cardelli_A_lambda(np.array([20000.0]), Av=1.0)[0] == pytest.approx(0.132, abs=0.005)
 
 
-@pytest.mark.xfail(strict=True, reason="review #9: variance dropped by the spectral resamplers")
 def test_variance_survives_pipeline(mock_data_dir, quiet):
+    """Review #9 (part): the spectral resamplers used to drop the variance."""
     from cubeshift import simulate_observation
 
     np.random.seed(0)

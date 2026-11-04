@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-import numpy as np
 from astropy.cosmology import Planck18
 
 from .cosmology import rescale_flux
@@ -12,7 +11,7 @@ from .instruments import TELESCOPES, Telescope
 from .psf import convolve_to_match_psf
 from .redshift import redshift_wavelength_axis
 from .resample import get_spaxel_area, resample_cube_to_telescope_and_redshift, shrink_to_redshift
-from .spectral import apply_dispersion_pipeline, resample_spectral_axis
+from .spectral import apply_dispersion_pipeline
 from .throughput import apply_transmission_filter
 
 
@@ -58,8 +57,9 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     6. Convert back to flux per (new) spaxel.
     7. Convolve from the source PSF (``source_telescope.spatial_fwhm``, shrunk to
        z_sim) to the target PSF (``target_telescope.psf_fwhm(lambda)``).
-    8. Choose a disperser, resample onto its grid and match its resolution.
-    9. Resample to the target spectral sampling (lambda/R).
+    8. Choose a NIRSpec disperser; on the native wavelength grid convolve from the
+       source resolution (``source_telescope.spectral_resolution``) to the
+       disperser's R(lambda); rebin (flux-conserving) onto the disperser's grid.
 
     Parameters
     ----------
@@ -134,14 +134,10 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
                                      z_obs=z_obs, z_sim=z_sim, cosmo=cosmo)
     _save(cube_psf, f"{filter_name}_psf")
 
-    # 8. disperser + spectral resolution
-    blurred_cube, disperser = apply_dispersion_pipeline(cube_psf, data_dir=data_dir)
-
-    # 9. spectral sampling.  Known issue (review #6): R from the telescope entry, not the grating.
-    wavelengths = blurred_cube.wave.coord()
-    bin_width = np.median(wavelengths) / target_telescope.spectral_resolution
-    new_wave_axis = np.arange(wavelengths[0], wavelengths[-1] + bin_width, bin_width)
-    final_cube = resample_spectral_axis(blurred_cube, new_wave_axis)
+    # 8. disperser: LSF from the source R to the grating's R(lambda) on the fine grid,
+    #    then flux-conserving rebin onto the grating's wavelength grid
+    final_cube, disperser = apply_dispersion_pipeline(
+        cube_psf, source_resolution=source_telescope.spectral_resolution, data_dir=data_dir)
     final_path = _save(final_cube, f"{filter_name}_{disperser}_lsf", final=True)
 
     return SimulationResult(cube=final_cube, filter_name=filter_name, disperser=disperser,
