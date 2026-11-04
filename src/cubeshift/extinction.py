@@ -13,6 +13,7 @@ import warnings
 
 import numpy as np
 
+from .cosmology import scale_cube
 from .io import read_cube
 
 
@@ -116,17 +117,12 @@ def milky_way_extinction_correction_cube(cube, Av, undo=False, output_filename=N
     Returns
     -------
     mpdaf.obj.Cube (and A_lambda if ``return_a_lam``)
-        New cube with header keyword EXTCORR set.  Variance is not rescaled.
+        New cube (variance scaled by the factor squared) with header keyword EXTCORR set.
     """
-    from mpdaf.obj import Cube
-
     cube = read_cube(cube)
-    corrected_data, A_lam = milky_way_extinction_correction(cube.wave.coord(), cube.data, Av, undo, Rv)
-
-    corrected_cube = Cube(data=corrected_data, wave=cube.wave, var=cube.var, mask=cube.mask,
-                          wcs=cube.wcs, copy=True)
-    corrected_cube.primary_header = cube.primary_header.copy()
-    corrected_cube.data_header = cube.data_header.copy()
+    A_lam = cardelli_A_lambda(cube.wave.coord(), Av, Rv)
+    factor = 10 ** (0.4 * A_lam)
+    corrected_cube = scale_cube(cube.copy(), 1 / factor if undo else factor)
     corrected_cube.data_header["EXTCORR"] = (not undo, "Milky Way extinction correction applied")
 
     if output_filename is not None:

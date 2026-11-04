@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 from astropy.cosmology import Planck18
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import correlate1d
 
 from .cosmology import angular_scale_ratio
 
@@ -47,7 +47,8 @@ def convolve_to_match_psf(cube, fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z
     Returns
     -------
     mpdaf.obj.Cube
-        Convolved copy of the cube (variance is not convolved yet).
+        Convolved copy of the cube; the variance is convolved with the squared
+        kernel (pixel covariance ignored).
     """
     wave = cube.wave.coord()
     target = fwhm_target_arcsec(wave) if callable(fwhm_target_arcsec) else np.full(wave.shape, fwhm_target_arcsec)
@@ -63,8 +64,36 @@ def convolve_to_match_psf(cube, fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z
     if np.all(kernel_fwhm == 0):
         print("Source PSF at z_sim is broader than the target everywhere; no convolution.")
         return convolved_cube
+    data = np.ma.getdata(cube.data).astype(float)
+    mask = np.ma.getmaskarray(cube.data)
+    good = np.isfinite(data) & ~mask
+    data = np.where(good, data, 0.0)
+    var = None
+    if cube.var is not None:
+        var = np.where(good, np.ma.getdata(cube.var).astype(float), 0.0)
+
+    def conv(img, ky, kx):
+        return correlate1d(correlate1d(img, ky, axis=0, mode="reflect"), kx, axis=1, mode="reflect")
+
     for i in range(cube.shape[0]):
         if kernel_fwhm[i] > 0:
-            convolved_cube.data[i] = gaussian_filter(np.ma.getdata(cube.data[i]),
-                                                     sigma=(sigma_y_pix[i], sigma_x_pix[i]))
+            ky, kx = gaussian_kernel1d(sigma_y_pix[i]), gaussian_kernel1d(sigma_x_pix[i])
+            # normalised convolution: bad pixels get no weight, and stay masked
+            w = conv(good[i].astype(float), ky, kx)
+            wsafe = np.where(w > 0, w, 1.0)
+            data[i] = conv(data[i], ky, kx) / wsafe
+            if var is not None:
+                # variance of a weighted sum: sum(k**2 v) (pixel covariance ignored)
+                var[i] = conv(var[i], ky ** 2, kx ** 2) / wsafe ** 2
+    convolved_cube.data = np.ma.array(data, mask=mask | ~good)
+    if var is not None:
+        convolved_cube.var = var
     return convolved_cube
+
+
+def gaussian_kernel1d(sigma, truncate=4.0):
+    """Normalised, sampled 1D Gaussian (as used by scipy.ndimage.gaussian_filter)."""
+    radius = int(truncate * sigma + 0.5)
+    x = np.arange(-radius, radius + 1)
+    k = np.exp(-0.5 * (x / sigma) ** 2)
+    return k / k.sum()

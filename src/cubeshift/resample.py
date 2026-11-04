@@ -155,8 +155,9 @@ def pad_cube_with_background(cube, target_nx, target_ny, noise_scale=1.0, rng=No
 
     The padding is valid (unmasked) simulated background; inside the original
     footprint the input mask is kept.  The footprint is recorded in the data
-    header as PADX0/PADY0 (0-based offsets) and PADNX/PADNY (size); the variance
-    of the padding is zero (no noise model yet, review #8).
+    header as PADX0/PADY0 (0-based offsets) and PADNX/PADNY (size).  The
+    variance of the padding is that of the noise drawn into it,
+    (noise_scale * std)**2.
 
     Parameters
     ----------
@@ -173,7 +174,7 @@ def pad_cube_with_background(cube, target_nx, target_ny, noise_scale=1.0, rng=No
     x0 = (target_nx - nx) // 2
     y0 = (target_ny - ny) // 2
 
-    padded_data = np.zeros((nz, target_ny, target_nx), dtype=np.float32)
+    padded_data = np.zeros((nz, target_ny, target_nx), dtype=float)
     padded_var = None
     padded_mask = None
     if cube.var is not None:
@@ -186,6 +187,7 @@ def pad_cube_with_background(cube, target_nx, target_ny, noise_scale=1.0, rng=No
         padded_data[k] = normal(loc=bkg, scale=bkg_std * noise_scale, size=(target_ny, target_nx))
         padded_data[k, y0:y0 + ny, x0:x0 + nx] = cube[k].data
         if padded_var is not None:
+            padded_var[k] = (bkg_std * noise_scale) ** 2
             padded_var[k, y0:y0 + ny, x0:x0 + nx] = cube.var[k, :, :]
         if padded_mask is not None:
             padded_mask[k, y0:y0 + ny, x0:x0 + nx] = cube.mask[k, :, :]

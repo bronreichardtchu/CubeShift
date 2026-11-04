@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from astropy.cosmology import Planck18
 
-from .cosmology import rescale_flux
+from .cosmology import flux_dimming_factor, scale_cube
 from .instruments import TELESCOPES, Telescope
 from .psf import convolve_to_match_psf
 from .redshift import redshift_wavelength_axis
@@ -112,9 +112,9 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     _save(redshifted_cube, "redshifted")
 
     # 2. flux dimming;  2b. angular size at z_sim;  3. flux -> surface brightness per z_sim arcsec^2
-    redshifted_cube.data = rescale_flux(redshifted_cube.data, z_obs, z_sim, cosmo=cosmo)
+    scale_cube(redshifted_cube, flux_dimming_factor(z_obs, z_sim, cosmo=cosmo))
     redshifted_cube = shrink_to_redshift(redshifted_cube, z_obs, z_sim, cosmo=cosmo)
-    redshifted_cube.data = redshifted_cube.data / get_spaxel_area(redshifted_cube)
+    scale_cube(redshifted_cube, 1.0 / get_spaxel_area(redshifted_cube))
     _save(redshifted_cube, "fluxscaled")
 
     # 4. filter throughput (in place)
@@ -126,7 +126,7 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
         transmission_cube, target_telescope, z_obs, z_sim, noise_scale=noise_scale, rng=rng, cosmo=cosmo)
 
     # 6. surface brightness -> flux per binned spaxel (masked spaxels stay masked)
-    cube_resampled.data = cube_resampled.data * get_spaxel_area(cube_resampled)
+    scale_cube(cube_resampled, get_spaxel_area(cube_resampled))
     _save(cube_resampled, "rebinned_fluxscaled")
 
     # 7. PSF matching: source seeing (shrunk to z_sim) -> target PSF(lambda)

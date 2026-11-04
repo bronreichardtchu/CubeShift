@@ -47,9 +47,9 @@ def chain(data_dir):
     with quiet():
         rc, _ = redshift_wavelength_axis(make_test_cube(), Z_OBS, Z_SIM)
     res.update(snap(rc, "s1_redshift_"))
-    rc.data = cosmology.rescale_flux(rc.data, Z_OBS, Z_SIM)
+    cosmology.scale_cube(rc, cosmology.flux_dimming_factor(Z_OBS, Z_SIM))
     rc = resample.shrink_to_redshift(rc, Z_OBS, Z_SIM)
-    rc.data = rc.data / resample.get_spaxel_area(rc)
+    cosmology.scale_cube(rc, 1.0 / resample.get_spaxel_area(rc))
     res.update(snap(rc, "s3_sb_"))
     with quiet():
         tc, filt = throughput.apply_transmission_filter(rc, Z_SIM, 5007, data_dir=data_dir)
@@ -61,7 +61,7 @@ def chain(data_dir):
     res.update(snap(cr, "s5_resampled_"))
     res["s5_bin_factors"] = np.asarray(bf)
     res["s5_dxdy"] = np.asarray([dx, dy])
-    cr.data = cr.data * resample.get_spaxel_area(cr)
+    cosmology.scale_cube(cr, resample.get_spaxel_area(cr))
     res.update(snap(cr, "s6_flux_"))
     with quiet():
         cp = psf.convolve_to_match_psf(cr, TELESCOPES["Keck_KCWI"].spatial_fwhm, nirspec.psf_fwhm, Z_OBS, Z_SIM)

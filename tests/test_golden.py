@@ -62,9 +62,9 @@ def test_pipeline_chain(golden_chain, mock_data_dir, quiet):
         rc, lam_new = redshift_wavelength_axis(make_test_cube(), Z_OBS, Z_SIM)
     assert_matches(rc, g, "s1_redshift_")
 
-    rc.data = cosmology.rescale_flux(rc.data, Z_OBS, Z_SIM)
+    cosmology.scale_cube(rc, cosmology.flux_dimming_factor(Z_OBS, Z_SIM))
     rc = resample.shrink_to_redshift(rc, Z_OBS, Z_SIM)
-    rc.data = rc.data / resample.get_spaxel_area(rc)
+    cosmology.scale_cube(rc, 1.0 / resample.get_spaxel_area(rc))
     assert_matches(rc, g, "s3_sb_")
 
     with quiet():
@@ -80,7 +80,7 @@ def test_pipeline_chain(golden_chain, mock_data_dir, quiet):
     np.testing.assert_array_equal(bf, g["s5_bin_factors"])
     np.testing.assert_allclose([dx, dy], g["s5_dxdy"], rtol=1e-12)
 
-    cr.data = cr.data * resample.get_spaxel_area(cr)
+    cosmology.scale_cube(cr, resample.get_spaxel_area(cr))
     assert_matches(cr, g, "s6_flux_", rtol=1e-6)
 
     with quiet():

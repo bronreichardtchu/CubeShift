@@ -24,11 +24,11 @@ def _spatial_chain(quiet, target=NIRSPEC):
     tot0 = np.nansum(cube.data) * cube.wave.get_step()
     with quiet():
         rc, _ = redshift_wavelength_axis(cube, Z_OBS, Z_SIM)
-        rc.data = cosmology.rescale_flux(rc.data, Z_OBS, Z_SIM)
-        rc.data = rc.data / resample.get_spaxel_area(rc)
+        cosmology.scale_cube(rc, cosmology.flux_dimming_factor(Z_OBS, Z_SIM))
+        cosmology.scale_cube(rc, 1.0 / resample.get_spaxel_area(rc))
         np.random.seed(0)
         cr, bf, _, dx, dy = resample.resample_cube_to_telescope_and_redshift(rc, target, Z_OBS, Z_SIM)
-        cr.data = cr.data * resample.get_spaxel_area(cr)
+        cosmology.scale_cube(cr, resample.get_spaxel_area(cr))
     n = cube.shape[1] // bf[0]
     o = (cr.shape[1] - n) // 2
     inner = np.zeros(cr.shape[1:], bool)
@@ -126,9 +126,9 @@ def test_surface_brightness_dimming():
     cube = make_test_cube()
     sb0 = np.nansum(cube.data) * cube.wave.get_step() / (cube.shape[1] * cube.shape[2] * 0.29 ** 2)
     rc, _ = redshift_wavelength_axis(cube, Z_OBS, Z_SIM)
-    rc.data = cosmology.rescale_flux(rc.data, Z_OBS, Z_SIM)
+    cosmology.scale_cube(rc, cosmology.flux_dimming_factor(Z_OBS, Z_SIM))
     rc = resample.shrink_to_redshift(rc, Z_OBS, Z_SIM)
-    rc.data = rc.data / resample.get_spaxel_area(rc)
+    cosmology.scale_cube(rc, 1.0 / resample.get_spaxel_area(rc))
     sb1 = np.nansum(rc.data) * rc.wave.get_step() / (rc.shape[1] * rc.shape[2])
     assert sb1 / sb0 == pytest.approx(((1 + Z_OBS) / (1 + Z_SIM)) ** 4, rel=1e-6)
     with pytest.raises(ValueError):
@@ -237,3 +237,63 @@ def test_variance_survives_pipeline(mock_data_dir, quiet):
         res = simulate_observation(make_test_cube(), Z_OBS, Z_SIM, "Keck_KCWI", "JWST_NIRSpec",
                                    data_dir=mock_data_dir)
     assert res.cube.var is not None
+
+
+# --- review #9: variance propagation ----------------------------------------
+def _snr(cube):
+    return np.ma.getdata(cube.data) / np.sqrt(np.ma.getdata(cube.var))
+
+
+def test_flux_scalings_preserve_snr(mock_data_dir, quiet):
+    """Dimming, SB conversion, throughput and MW extinction rescale data and variance together."""
+    from cubeshift.extinction import milky_way_extinction_correction_cube
+    from cubeshift.throughput import apply_transmission_filter
+
+    cube = make_test_cube()
+    snr0 = _snr(cube)
+    rc, _ = redshift_wavelength_axis(cube, Z_OBS, Z_SIM)
+    cosmology.scale_cube(rc, cosmology.flux_dimming_factor(Z_OBS, Z_SIM))
+    rc = resample.shrink_to_redshift(rc, Z_OBS, Z_SIM)
+    cosmology.scale_cube(rc, 1.0 / resample.get_spaxel_area(rc))
+    np.testing.assert_allclose(_snr(rc), snr0, rtol=1e-10)
+    with quiet():
+        tc, _ = apply_transmission_filter(rc, Z_SIM, 5007, data_dir=mock_data_dir)
+    t = np.ma.getdata(tc.data) != 0
+    np.testing.assert_allclose(_snr(tc)[t], snr0[t], rtol=1e-10)
+    ext = milky_way_extinction_correction_cube(cube, 0.3)
+    np.testing.assert_allclose(_snr(ext), snr0, rtol=1e-10)
+
+
+def test_surface_brightness_binning_variance():
+    """Sum / N must have variance sum(v) / N^2 (it was sum(v))."""
+    from cubeshift.binning import bin_data
+
+    c = make_test_cube(nx=12, ny=9, nw=3)
+    c.var = np.full(c.shape, 4.0)
+    b = bin_data(3, 3, c, surface_brightness=True)
+    np.testing.assert_allclose(b.var, 4.0 / 9)
+
+
+def test_psf_variance_matches_noise():
+    """Convolved variance equals the empirical variance of convolved white noise."""
+    from mpdaf.obj import WCS, Cube, WaveCoord
+
+    from cubeshift.psf import convolve_to_match_psf
+
+    rng = np.random.default_rng(1)
+    n = 300
+    noise = rng.normal(0, 1, (1, n, n))
+    cube = Cube(data=noise, var=np.ones_like(noise),
+                wave=WaveCoord(crval=20000.0, cdelt=1.0, crpix=1, cunit="Angstrom"),
+                wcs=WCS(crval=(0, 0), cdelt=(0.01 / 3600, -0.01 / 3600), shape=(n, n), deg=True))
+    out = convolve_to_match_psf(cube, 0.0, 0.05, Z_OBS, Z_SIM)       # 5 px FWHM kernel
+    inner = (slice(None), slice(20, -20), slice(20, -20))
+    assert np.var(np.ma.getdata(out.data)[inner]) == pytest.approx(np.median(out.var[inner]), rel=0.05)
+
+
+def test_padding_variance_matches_padding_noise(quiet):
+    _, cr, _, inner, _ = _spatial_chain(quiet)
+    pad = ~inner
+    k = cr.shape[0] // 2
+    assert np.std(np.ma.getdata(cr.data)[k][pad]) == pytest.approx(np.sqrt(np.ma.getdata(cr.var)[k][pad].mean()),
+                                                                    rel=0.1)

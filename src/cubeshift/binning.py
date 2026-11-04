@@ -120,15 +120,17 @@ def _calc_var_median(newdata: np.ndarray, axes: tuple[int, ...], unmasked: np.nd
 
 
 def _bin_var(data_cube: Cube | Image, newdata: np.ndarray, preshape: np.ndarray,
-             unmasked: np.ndarray, method: str = "sum") -> Cube | Image:
+             unmasked: np.ndarray, method: str = "sum", surface_brightness: bool = False) -> Cube | Image:
     """Propagate the variance for the chosen binning method.
 
-    Note: with ``surface_brightness=True`` the data are divided by N but the
-    variance is still sum(v[i]) (review #9; kept for now to preserve outputs).
+    With ``surface_brightness=True`` (sum divided by N) this is sum(v[i]) / N**2,
+    the same as for the mean.
     """
     axes = _bin_axes(data_cube.ndim)
     newvar = data_cube.var.reshape(preshape)
-    if method == "sum":
+    if method == "sum" and surface_brightness:
+        newvar = _calc_var_mean(newvar, axes, unmasked)
+    elif method == "sum":
         newvar = _calc_var_sum(newvar, axes)
     elif method == "mean":
         newvar = _calc_var_mean(newvar, axes, unmasked)
@@ -208,7 +210,8 @@ def bin_data(x_factor: int, y_factor: int, data_cube: Cube | Image, margin: str 
     data_cube = _bin_data(data_cube, newdata, unmasked, method=method,
                           surface_brightness=surface_brightness)
     if data_cube._var is not None:
-        data_cube = _bin_var(data_cube, newdata, preshape, unmasked, method=method)
+        data_cube = _bin_var(data_cube, newdata, preshape, unmasked, method=method,
+                             surface_brightness=surface_brightness)
     data_cube = _mask_output_array(data_cube, unmasked)
     data_cube = _update_wcs(data_cube, factor)
     return data_cube

@@ -8,6 +8,7 @@ from astropy.io import fits
 from scipy.interpolate import interp1d
 
 from .config import get_data_dir
+from .cosmology import scale_cube
 from .instruments import NIRSPEC_THROUGHPUT_RANGES
 
 
@@ -74,7 +75,7 @@ def apply_nirspec_throughput(cube, z, line_rest_wavelength, filter_dir):
     throughput = interp1d(wave_file, trans_file, bounds_error=False, fill_value=0.0)(cube_waves_um)
 
     # Known issue (review #10): calibrated JWST cubes should not be multiplied by throughput.
-    cube.data *= throughput[:, np.newaxis, np.newaxis]
+    scale_cube(cube, throughput)
     return cube, cube_waves_um, throughput, os.path.basename(path), mode
 
 
