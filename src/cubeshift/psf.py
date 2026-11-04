@@ -52,8 +52,12 @@ def convolve_to_match_psf(cube, fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z
         Convolved copy of the cube; the variance is convolved with the squared
         kernel (pixel covariance ignored).
     """
-    wave = cube.wave.coord()
-    target = fwhm_target_arcsec(wave) if callable(fwhm_target_arcsec) else np.full(wave.shape, fwhm_target_arcsec)
+    if callable(fwhm_target_arcsec):
+        if cube.wave is None:
+            raise ValueError("cube has no wavelength axis; pass the target FWHM as a number")
+        target = np.asarray(fwhm_target_arcsec(cube.wave.coord()), float)
+    else:
+        target = np.full(cube.shape[0], float(fwhm_target_arcsec))
     kernel_fwhm = matching_kernel_fwhm(fwhm_source_arcsec, target, z_obs, z_sim, cosmo, distance_obs_mpc)
 
     dy_arcsec, dx_arcsec = np.abs(cube.wcs.get_step(unit="arcsec"))

@@ -143,3 +143,63 @@ def fit_gaussian_line(wave, spectrum, center=None, window=None):
     amp, mu, sigma, offset = popt
     return {"amp": amp, "mu": mu, "sigma": abs(sigma), "fwhm": 2.3548200450309493 * abs(sigma),
             "offset": offset}
+
+
+def make_hst_like_image(nx=400, ny=420, pixscale_arcsec=0.05, rot_deg=8.0, sigma_pix=20.0,
+                        peak=1.0, background=0.0, point_source=False):
+    """Synthetic HST/ACS-like image: Gaussian galaxy in electrons/s with a rotated CD matrix.
+
+    Parameters
+    ----------
+    sigma_pix : float
+        Gaussian sigma of the galaxy in pixels (ignored if ``point_source``).
+    point_source : bool
+        Put all the flux in the central pixel instead.
+
+    Returns
+    -------
+    mpdaf.obj.Image
+        With BUNIT, PHOTFLAM, PHOTPLAM (F555W-like) in ``data_header``.
+    """
+    from mpdaf.obj import Image
+
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    if point_source:
+        data = np.full((ny, nx), background, float)
+        data[ny // 2, nx // 2] += peak
+    else:
+        data = background + peak * np.exp(-((xx - (nx - 1) / 2) ** 2 + (yy - (ny - 1) / 2) ** 2)
+                                          / (2 * sigma_pix ** 2))
+    s = pixscale_arcsec / 3600.0
+    th = np.radians(rot_deg)
+    h = fits.Header()
+    h["NAXIS"], h["NAXIS1"], h["NAXIS2"] = 2, nx, ny
+    h["CTYPE1"], h["CTYPE2"] = "RA---TAN", "DEC--TAN"
+    h["CRVAL1"], h["CRVAL2"] = 13.73, -37.68
+    h["CRPIX1"], h["CRPIX2"] = (nx + 1) / 2, (ny + 1) / 2
+    h["CD1_1"], h["CD1_2"] = -s * np.cos(th), -s * np.sin(th)
+    h["CD2_1"], h["CD2_2"] = -s * np.sin(th), s * np.cos(th)
+    image = Image(data=data, wcs=MPDAF_WCS(h))
+    image.data_header["BUNIT"] = "ELECTRONS/S"
+    image.data_header["PHOTFLAM"] = 1.93985e-19
+    image.data_header["PHOTPLAM"] = 5360.24
+    return image
+
+
+def write_hst_like_drc(path, uncovered_corner=40, **kwargs):
+    """Write :func:`make_hst_like_image` as a _drc-style file (PRIMARY, SCI, WHT).
+
+    The WHT is zero in a ``uncovered_corner`` x ``uncovered_corner`` corner.
+    """
+    image = make_hst_like_image(**kwargs)
+    sci = fits.ImageHDU(np.asarray(image.data, dtype=np.float32), header=image.wcs.to_header(), name="SCI")
+    for k in ("BUNIT", "PHOTFLAM", "PHOTPLAM"):
+        sci.header[k] = image.data_header[k]
+    wht = np.full(image.shape, 1080.0, np.float32)
+    wht[:uncovered_corner, :uncovered_corner] = 0
+    primary = fits.PrimaryHDU()
+    primary.header.update(TELESCOP="HST", INSTRUME="ACS", DETECTOR="WFC", FILTER1="F555W",
+                          FILTER2="CLEAR2L", TARGNAME="TEST", EXPTIME=1080.0)
+    fits.HDUList([primary, sci, fits.ImageHDU(wht, header=image.wcs.to_header(), name="WHT")]).writeto(
+        path, overwrite=True)
+    return path

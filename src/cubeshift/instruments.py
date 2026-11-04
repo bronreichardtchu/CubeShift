@@ -84,6 +84,15 @@ TELESCOPES = {
         spectral_sampling=2.0,
         mirror_diameter=6.5,
     ),
+    "HST_ACS_WFC": Telescope(
+        name="HST ACS/WFC",
+        pixel_scale_x=0.05,         # native / standard drizzled _drz/_drc
+        pixel_scale_y=0.05,
+        spatial_fwhm=0.10,          # drizzled PSF, ~F555W-F814W; set per filter if needed
+        spectral_resolution=None,   # imaging
+        fov_x=202.0,
+        fov_y=202.0,
+    ),
     "Keck_KCWI": Telescope(
         name="Keck KCWI",
         pixel_scale_x=0.29,         # medium slicer

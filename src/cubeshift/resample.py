@@ -152,7 +152,7 @@ def resample_cube_to_telescope_and_redshift(cube, target_telescope, z_source, z_
     else:
         cube_resampled = cube_binned
 
-    wave_step = cube.wave.get_step()
+    wave_step = cube.wave.get_step() if cube.wave is not None else None
     return cube_resampled, (bin_factor_x, bin_factor_y), wave_step, dx_arcsec_new, dy_arcsec_new
 
 
