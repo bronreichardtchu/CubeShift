@@ -46,7 +46,7 @@ def _compute_shortened_axis_dimensions(data_cube: Cube | Image, num_extra_pixels
             nstart = 0
         elif margin == "center":
             nstart = num_extra_pixels[k] // 2
-        elif margin == "right":
+        else:  # 'right' (margin is validated in bin_data)
             nstart = num_extra_pixels[k]
         slices.append(slice(nstart, data_cube.shape[k] - num_extra_pixels[k] + nstart))
     return tuple(slices)
