@@ -10,7 +10,8 @@ from .cosmology import angular_scale_ratio
 FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
 
 
-def matching_kernel_fwhm(fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z_sim, cosmo=Planck18):
+def matching_kernel_fwhm(fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z_sim, cosmo=Planck18,
+                         distance_obs_mpc=None):
     """FWHM (arcsec at z_sim) of the Gaussian that turns the source PSF into the target PSF.
 
     The source PSF (arcsec at z_obs) shrinks by D_A(z_obs)/D_A(z_sim);
@@ -24,11 +25,12 @@ def matching_kernel_fwhm(fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z_sim, c
     fwhm_target_arcsec : float or array
         Target PSF FWHM, e.g. one value per wavelength.
     """
-    fwhm_sim = fwhm_source_arcsec * angular_scale_ratio(z_obs, z_sim, cosmo)
+    fwhm_sim = fwhm_source_arcsec * angular_scale_ratio(z_obs, z_sim, cosmo, distance_obs_mpc)
     return np.sqrt(np.maximum(np.asarray(fwhm_target_arcsec, float) ** 2 - fwhm_sim ** 2, 0.0))
 
 
-def convolve_to_match_psf(cube, fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z_sim, cosmo=Planck18):
+def convolve_to_match_psf(cube, fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z_sim, cosmo=Planck18,
+                          distance_obs_mpc=None):
     """Convolve each wavelength slice so the PSF matches the target instrument.
 
     Parameters
@@ -50,9 +52,13 @@ def convolve_to_match_psf(cube, fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z
         Convolved copy of the cube; the variance is convolved with the squared
         kernel (pixel covariance ignored).
     """
-    wave = cube.wave.coord()
-    target = fwhm_target_arcsec(wave) if callable(fwhm_target_arcsec) else np.full(wave.shape, fwhm_target_arcsec)
-    kernel_fwhm = matching_kernel_fwhm(fwhm_source_arcsec, target, z_obs, z_sim, cosmo)
+    if callable(fwhm_target_arcsec):
+        if cube.wave is None:
+            raise ValueError("cube has no wavelength axis; pass the target FWHM as a number")
+        target = np.asarray(fwhm_target_arcsec(cube.wave.coord()), float)
+    else:
+        target = np.full(cube.shape[0], float(fwhm_target_arcsec))
+    kernel_fwhm = matching_kernel_fwhm(fwhm_source_arcsec, target, z_obs, z_sim, cosmo, distance_obs_mpc)
 
     dy_arcsec, dx_arcsec = np.abs(cube.wcs.get_step(unit="arcsec"))
     sigma_x_pix = kernel_fwhm * FWHM_TO_SIGMA / dx_arcsec

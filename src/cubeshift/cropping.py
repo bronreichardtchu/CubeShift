@@ -5,8 +5,8 @@ import numpy as np
 
 
 def _finite_bbox(data, buffer=0):
-    """Bounding box (y_min, y_max, x_min, x_max) of spaxels finite in any slice."""
-    valid_mask = np.isfinite(data).any(axis=0)
+    """Bounding box (y_min, y_max, x_min, x_max) of spaxels finite and unmasked in any slice."""
+    valid_mask = (np.isfinite(np.ma.getdata(data)) & ~np.ma.getmaskarray(data)).any(axis=0)
     y_valid, x_valid = np.where(valid_mask)
     if len(y_valid) == 0 or len(x_valid) == 0:
         raise ValueError("No finite spatial pixels found.")
@@ -90,7 +90,7 @@ def crop_nan_mask_fallback(cube, buffer=4, min_crop_size=30, debug=False):
 
 
 def trim_empty_edges(cube, buffer=0, debug=False):
-    """Trim spatial borders where every value is NaN.
+    """Trim spatial borders where every value is NaN or masked.
 
     Parameters
     ----------
