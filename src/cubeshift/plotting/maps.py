@@ -5,6 +5,7 @@ from matplotlib.patches import Patch
 from astropy.io import fits
 from astropy.wcs import WCS as AstropyWCS
 from mpdaf.obj import Cube, WCS as MpdafWCS
+from reproject import reproject_interp
 
 from ..analysis.balmer import plot_hbeta_hgamma_ratio_amp_soft
 from ..cropping import trim_empty_edges
@@ -63,8 +64,6 @@ def _reproject_cube_preserve_wcs(cube, target_spatial_wcs_astropy, shape_out):
     mpdaf.obj.Cube
         Reprojected cube with the original wavelength axis.
     """
-    from reproject import reproject_interp  # optional dependency, imported lazily
-
     nz = cube.shape[0]
     ny, nx = shape_out
     new_data = np.empty((nz, ny, nx), dtype=cube.data.dtype)
