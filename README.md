@@ -1,5 +1,7 @@
 # CubeShift
 
+[![Pylint](https://github.com/bronreichardtchu/CubeShift/actions/workflows/pylint.yml/badge.svg)](https://github.com/bronreichardtchu/CubeShift/actions/workflows/pylint.yml)
+
 A Python package to artificially redshift IFU data.
 
 CubeShift simulates how a low-redshift IFU (Integral Field Unit) data cube would look if the
