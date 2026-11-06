@@ -64,12 +64,13 @@ def redshift_wavelength_axis(filename, z_obs, z_sim, pixscale_arcsec=None, keep_
 
         cdelt1_deg = -(px_x_arcsec / 3600.0) if keep_ra_negative else (px_x_arcsec / 3600.0)
         cdelt2_deg = px_y_arcsec / 3600.0
+        # mpdaf takes (y, x) = (Dec, RA) order; deg=True gives a RA---TAN/DEC--TAN WCS in degrees
         wcs_spatial = MPDAF_WCS(
-            crval=(header.get("CRVAL1", 0.0), header.get("CRVAL2", 0.0)),
-            cdelt=(cdelt1_deg, cdelt2_deg),
-            crpix=(header.get("CRPIX1", 1.0), header.get("CRPIX2", 1.0)),
-            cunit=("deg", "deg"),
-            ctype=(header.get("CTYPE1", "RA---TAN"), header.get("CTYPE2", "DEC--TAN")),
+            crval=(header.get("CRVAL2", 0.0), header.get("CRVAL1", 0.0)),
+            cdelt=(cdelt2_deg, cdelt1_deg),
+            crpix=(header.get("CRPIX2", 1.0), header.get("CRPIX1", 1.0)),
+            shape=np.shape(data)[1:],
+            deg=True,
         )
 
     redshifted_cube = Cube(data=data, var=var, wcs=wcs_spatial, wave=wave)

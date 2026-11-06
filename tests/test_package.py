@@ -84,3 +84,14 @@ def test_data_dir_resolution(tmp_path, monkeypatch):
 def test_unknown_telescope():
     with pytest.raises(KeyError):
         cubeshift.simulate_observation(make_test_cube(), 0.025, 3.0, "Keck_KCWI", "Hubble")
+
+
+def test_redshift_builds_wcs_from_pixscale():
+    """Header without a spatial WCS + pixscale_arcsec (mpdaf takes (y, x) order, no cunit/ctype)."""
+    from mpdaf.obj import Cube, WaveCoord
+
+    c = Cube(data=np.ones((5, 4, 6)), wave=WaveCoord(crval=5000.0, cdelt=1.0, crpix=1, cunit="Angstrom"))
+    out, _ = redshift.redshift_wavelength_axis(c, 0.0, 1.0, pixscale_arcsec=(0.2, 0.3))
+    dy, dx = out.wcs.get_step(unit="arcsec")
+    assert (dy, dx) == pytest.approx((0.3, 0.2))
+    assert out.wcs.get_axis_increments(unit="arcsec")[1] < 0       # RA increases to the left
