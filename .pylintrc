@@ -1,0 +1,35 @@
+[MAIN]
+# Generator for the pre-refactor golden files: imports the legacy flat modules
+# that no longer exist in this tree (see its docstring).
+ignore-paths=tests/golden/make_golden.py
+
+# Modules whose members are created dynamically (pylint cannot see them,
+# e.g. astropy.units.arcsec, astropy.cosmology.Planck18, scipy.special.erf).
+ignored-modules=astropy.units,astropy.cosmology,astropy.constants,scipy.special
+
+[TYPECHECK]
+# FITS HDU .data/.header and mpdaf .var are properties pylint misreads.
+generated-members=data,header,var
+
+[FORMAT]
+max-line-length=120
+
+[MESSAGES CONTROL]
+disable=
+    # scientific names (R, L_source, A_lam, F_Halpha_over_F_Hbeta, ...)
+    invalid-name,
+    # pipeline/analysis functions legitimately take many inputs
+    too-many-arguments,
+    too-many-positional-arguments,
+    too-many-locals,
+    too-many-statements,
+    too-many-branches,
+    too-many-instance-attributes,
+    too-few-public-methods,
+    # deliberate: optional/heavy imports are done lazily inside functions
+    import-outside-toplevel,
+    # deliberate: binning edits mpdaf's _data/_var/_mask like mpdaf's own _rebin
+    protected-access,
+    # tests and small helpers do not all need docstrings
+    missing-function-docstring,
+    duplicate-code,

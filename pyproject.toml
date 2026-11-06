@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Artificially redshift IFU data cubes and re-observe them with another instrument"
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 authors = [
     { name = "Bronwyn Reichardt Chu" },
     { name = "Janevra Pier" },

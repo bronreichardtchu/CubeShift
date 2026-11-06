@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass, field
 
 from astropy.cosmology import Planck18
+from mpdaf.obj import Cube
 
 from .cosmology import flux_dimming_factor, scale_cube
 from .instruments import TELESCOPES, Telescope
@@ -19,7 +20,7 @@ from .throughput import apply_transmission_filter
 class SimulationResult:
     """Output of :func:`simulate_observation`."""
 
-    cube: object
+    cube: Cube
     """Final simulated mpdaf Cube."""
     filter_name: str
     """NIRSpec filter applied, e.g. 'f170lp'."""
