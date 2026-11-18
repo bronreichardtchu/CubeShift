@@ -52,6 +52,29 @@ def read_cube(cube_or_path, ext=None) -> Cube:
     return read_in_datacube(str(cube_or_path), ext=ext)
 
 
+def _wavelength_axis(header) -> np.ndarray | None:
+    """Wavelength of every pixel along FITS axis 3, or None if the header has no axis 3.
+
+    Uses the linear FITS WCS rule  lambda_i = CRVAL3 + (i + 1 - CRPIX3) * CDELT3
+    for 0-based pixel index i.  CRPIX3 defaults to 1 (the FITS default), so files
+    whose reference pixel is not the first one are no longer shifted, and the
+    axis always has exactly NAXIS3 elements (``np.arange`` with a float step can
+    return NAXIS3 + 1 through rounding).
+    """
+    # the reference value and the number of pixels are required
+    if "CRVAL3" not in header or "NAXIS3" not in header:
+        return None
+    # the step: CDELT3, else the CD matrix element (no rotation along the spectral axis)
+    cdelt = header.get("CDELT3", header.get("CD3_3"))
+    if cdelt is None:
+        return None
+    # reference pixel (1-based); FITS says it defaults to 1 when absent
+    crpix = header.get("CRPIX3", 1.0)
+    naxis = int(header["NAXIS3"])
+    # integer pixel indices -> exactly naxis wavelengths, with the reference pixel at CRVAL3
+    return header["CRVAL3"] + (np.arange(naxis) + 1.0 - crpix) * cdelt
+
+
 def read_in_data(input_cube):
     """Read a cube into plain arrays.
 
@@ -92,14 +115,9 @@ def read_in_data(input_cube):
                 data_hdu = hdu
                 data = hdu.data
                 header = hdu.header
-                try:
-                    crval = header["CRVAL3"]
-                    cdelt = header.get("CDELT3", header.get("CD3_3"))
-                    naxis = header["NAXIS3"]
-                    lamdas = np.arange(crval, crval + naxis * cdelt, cdelt)
+                lamdas = _wavelength_axis(header)
+                if lamdas is not None:
                     break
-                except KeyError:
-                    continue
 
         if data_hdu is None:
             raise ValueError(f"No data found in FITS file {filename}")
