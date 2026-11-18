@@ -183,7 +183,9 @@ def _apply_spectral_operator(cube, M, new_wave_axis):
     out_cube = Cube(data=out.reshape(n_new, ny, nx), var=var, mask=out_mask.reshape(n_new, ny, nx),
                     wcs=cube.wcs, wave=create_wavecoord_from_axis(new_wave_axis), copy=False)
     out_cube.primary_header = cube.primary_header.copy()
-    out_cube.data_header.extend([c for c in cube.data_header.cards if c.keyword.startswith(("CSANG", "PAD"))])
+    # carry over CubeShift provenance: angular scale, background used for padding, data footprint
+    out_cube.data_header.extend([c for c in cube.data_header.cards
+                                 if c.keyword.startswith(("CSANG", "CSBKG", "PAD"))])
     return out_cube
 
 
