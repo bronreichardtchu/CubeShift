@@ -116,3 +116,52 @@ def test_redshift_uses_cube_wcs_not_primary_header():
     # the whole axis is stretched by (1 + 1) / (1 + 0) = 2
     np.testing.assert_allclose(out.wave.coord(), 2.0 * c.wave.coord())
     np.testing.assert_allclose(lam_new, 2.0 * c.wave.coord())
+
+
+# --- M14: flux unit and primary header survive the pipeline ----------------------------
+
+def test_pipeline_keeps_unit_and_primary_header(mock_data_dir, quiet):
+    """BUNIT and observation metadata reach the final cube; stale WCS cards do not."""
+    import astropy.units as u
+
+    from cubeshift import simulate_observation
+    from cubeshift.testing import make_test_cube
+
+    # KCWI-like input: flux unit, an OBJECT card, and the spatial WCS copied
+    # into the primary header (which becomes wrong once the pixels shrink)
+    flux_unit = u.Unit("1e-16 erg / (s cm2 Angstrom)")
+    c = make_test_cube(wcs_in_primary=True)
+    c.unit = flux_unit
+    c.primary_header["OBJECT"] = "TESTGAL"
+
+    with quiet():
+        res = simulate_observation(c, 0.025, 3.0, "Keck_KCWI", "JWST_NIRSpec", data_dir=mock_data_dir)
+    # same flux-density unit: per Angstrom per (new) spaxel
+    assert res.cube.unit == flux_unit
+    # metadata kept, input-grid WCS cards dropped from the primary header
+    assert res.cube.primary_header["OBJECT"] == "TESTGAL"
+    assert not any(k.startswith(("CD1_", "CDELT1", "CRPIX1")) for k in res.cube.primary_header)
+
+
+def test_file_bunit_parsed_or_kept_as_csbunit(tmp_path):
+    """A parseable BUNIT becomes the cube unit; an unparseable one is kept as CSBUNIT."""
+    import astropy.units as u
+
+    from cubeshift.redshift import redshift_wavelength_axis
+
+    def _cube_file(name, bunit):
+        # flux in the primary HDU with a minimal 3-axis WCS and the given BUNIT
+        hdr = _spectral_header()
+        hdr["CDELT1"], hdr["CDELT2"] = -0.29 / 3600, 0.29 / 3600
+        hdr["CTYPE1"], hdr["CTYPE2"] = "RA---TAN", "DEC--TAN"
+        hdr["BUNIT"] = bunit
+        path = tmp_path / name
+        fits.PrimaryHDU(np.ones((4, 2, 3)), header=hdr).writeto(path)
+        return str(path)
+
+    out, _ = redshift_wavelength_axis(_cube_file("ok.fits", "erg/s/cm2/Angstrom"), 0.0, 1.0)
+    assert out.unit == u.Unit("erg / (s cm2 Angstrom)")
+
+    with pytest.warns(UserWarning, match="CSBUNIT"):
+        out, _ = redshift_wavelength_axis(_cube_file("odd.fits", "COUNTS/PIXEL/BANANA"), 0.0, 1.0)
+    assert out.data_header["CSBUNIT"] == "COUNTS/PIXEL/BANANA"

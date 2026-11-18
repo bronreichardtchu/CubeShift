@@ -1,10 +1,14 @@
 """Redshifting the wavelength axis of a cube, and wavelength-frame conversions."""
 from __future__ import annotations
 
+import warnings
+
+import astropy.units as u
 import numpy as np
 from astropy.io import fits
 from mpdaf.obj import WCS as MPDAF_WCS
 from mpdaf.obj import Cube, WaveCoord
+from mpdaf.tools import fix_unit_read
 
 from .io import read_in_data
 
@@ -92,9 +96,67 @@ def redshift_wavelength_axis(filename, z_obs, z_sim, pixscale_arcsec=None, keep_
             deg=True,
         )
 
-    redshifted_cube = Cube(data=data, var=var, wcs=wcs_spatial, wave=wave)
+    # Units and headers (review v2 M14): keep the flux unit and the primary
+    # header (observation metadata), which were dropped before
+    if isinstance(filename, Cube):
+        # a Cube already holds its unit; earlier CubeShift steps may have left a
+        # CSBUNIT card for a unit mpdaf could not parse
+        unit = filename.unit
+        csbunit = filename.data_header.get("CSBUNIT")
+        primary = filename.primary_header
+    else:
+        # a file: parse BUNIT of the data HDU, and read the primary header
+        unit, csbunit = _unit_from_bunit(header.get("BUNIT"))
+        primary = fits.getheader(filename, 0)
+
+    redshifted_cube = Cube(data=data, var=var, wcs=wcs_spatial, wave=wave, unit=unit,
+                           primary_header=_primary_metadata(primary))
+    # keep the original BUNIT string when mpdaf cannot represent it
+    if csbunit:
+        redshifted_cube.data_header["CSBUNIT"] = (csbunit, "original BUNIT of the input cube")
     redshifted_cube.data_header["REDSHIFT"] = (z_sim, "Simulated redshift applied to wavelength axis")
     return redshifted_cube, lam_new
+
+
+def _unit_from_bunit(bunit):
+    """(astropy unit, raw string to keep) for a FITS BUNIT value.
+
+    Returns (unit, None) when the string parses, (dimensionless, bunit) when it
+    does not (e.g. 'ELECTRONS/S'), so the caller can store it as CSBUNIT, and
+    (dimensionless, None) when there is no BUNIT (mpdaf's own default).
+    """
+    if not bunit:
+        return u.dimensionless_unscaled, None
+    try:
+        # fix_unit_read handles the spellings mpdaf itself accepts on reading
+        return u.Unit(fix_unit_read(str(bunit))), None
+    except ValueError:
+        warnings.warn(f"BUNIT {bunit!r} is not a unit astropy understands; the cube is "
+                      "treated as dimensionless and the string is kept as CSBUNIT")
+        return u.dimensionless_unscaled, str(bunit)
+
+
+# Primary-header keywords that describe an HDU's array or WCS rather than the
+# observation.  They are dropped when the primary header is carried over: the
+# output's arrays and WCS live in its DATA/STAT extensions and have changed
+# (wavelengths redshifted, pixels shrunk), so stale copies would mislead.
+_STRUCTURE_KEYS = {"SIMPLE", "BITPIX", "EXTEND", "XTENSION", "PCOUNT", "GCOUNT", "EXTNAME",
+                   "BSCALE", "BZERO", "BUNIT", "WCSAXES", "LONPOLE", "LATPOLE", "CHECKSUM",
+                   "DATASUM"}
+_STRUCTURE_PREFIXES = ("NAXIS", "CRVAL", "CRPIX", "CDELT", "CTYPE", "CUNIT", "CROTA",
+                       "CD1_", "CD2_", "CD3_", "PC1_", "PC2_", "PC3_")
+
+
+def _primary_metadata(header):
+    """Copy of a primary header without the array-structure and WCS keywords."""
+    out = fits.Header()
+    for card in header.cards:
+        key = card.keyword
+        # skip structure/WCS cards; keep everything else (incl. COMMENT/HISTORY)
+        if key in _STRUCTURE_KEYS or key.startswith(_STRUCTURE_PREFIXES):
+            continue
+        out.append(card)
+    return out
 
 
 def air_to_vac(wavelength: np.ndarray) -> np.ndarray:

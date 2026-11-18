@@ -180,12 +180,15 @@ def _apply_spectral_operator(cube, M, new_wave_axis):
         var = var.reshape(-1, ny, nx)
 
     n_new = len(new_wave_axis)
+    # the operator is linear and dimensionless, so the flux unit is unchanged (review v2 M14)
     out_cube = Cube(data=out.reshape(n_new, ny, nx), var=var, mask=out_mask.reshape(n_new, ny, nx),
-                    wcs=cube.wcs, wave=create_wavecoord_from_axis(new_wave_axis), copy=False)
+                    wcs=cube.wcs, wave=create_wavecoord_from_axis(new_wave_axis), unit=cube.unit,
+                    copy=False)
     out_cube.primary_header = cube.primary_header.copy()
-    # carry over CubeShift provenance: angular scale, background used for padding, data footprint
+    # carry over CubeShift provenance: angular scale, background used for padding,
+    # data footprint, and the original BUNIT string if mpdaf could not parse it
     out_cube.data_header.extend([c for c in cube.data_header.cards
-                                 if c.keyword.startswith(("CSANG", "CSBKG", "PAD"))])
+                                 if c.keyword.startswith(("CSANG", "CSBKG", "PAD", "CSBUNIT"))])
     return out_cube
 
 
