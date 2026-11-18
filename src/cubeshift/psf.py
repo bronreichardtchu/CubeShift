@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import numpy as np
 from astropy.cosmology import Planck18
-from scipy.ndimage import correlate1d
 from scipy.signal import fftconvolve
 from scipy.special import erf
 
@@ -287,63 +286,22 @@ def psf_match_and_bin(cube, bin_x, bin_y, fwhm_source_arcsec=None, fwhm_target_a
 
 
 def convolve_to_match_psf(cube, fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z_sim, cosmo=Planck18):
-    """Convolve each wavelength slice so the PSF matches the target instrument.
+    """Convolve each wavelength slice so the PSF matches the target instrument (no binning).
+
+    The cube is zero-padded by the blur margin so the PSF wings are kept (the
+    output is larger than the input; the WCS is shifted accordingly).  The
+    variance is propagated exactly for independent input pixels.
 
     Parameters
     ----------
     cube : mpdaf.obj.Cube
-        Its spatial WCS must be at the angular scale of z_sim (as produced by
-        :func:`cubeshift.resample.resample_cube_to_telescope_and_redshift`).
+        WCS at the angular scale of z_sim.
     fwhm_source_arcsec : float
-        Source PSF FWHM in arcsec at z_obs (e.g. ``source_telescope.spatial_fwhm``).
+        Source PSF FWHM in arcsec at z_obs.
     fwhm_target_arcsec : float or callable
-        Target PSF FWHM in arcsec, or a function of wavelength (Angstrom), e.g.
-        ``target_telescope.psf_fwhm``.
+        Target PSF FWHM in arcsec, or a function of wavelength (Angstrom).
     z_obs, z_sim : float
         Original and simulated redshift.
-
-    Returns
-    -------
-    mpdaf.obj.Cube
-        Convolved copy of the cube; the variance is convolved with the squared
-        kernel (pixel covariance ignored).
     """
-    wave = cube.wave.coord()
-    target = fwhm_target_arcsec(wave) if callable(fwhm_target_arcsec) else np.full(wave.shape, fwhm_target_arcsec)
-    kernel_fwhm = matching_kernel_fwhm(fwhm_source_arcsec, target, z_obs, z_sim, cosmo)
-
-    dy_arcsec, dx_arcsec = np.abs(cube.wcs.get_step(unit="arcsec"))
-    sigma_x_pix = kernel_fwhm * FWHM_TO_SIGMA / dx_arcsec
-    sigma_y_pix = kernel_fwhm * FWHM_TO_SIGMA / dy_arcsec
-    print(f"PSF matching: kernel FWHM {kernel_fwhm.min():.4f}-{kernel_fwhm.max():.4f}\" "
-          f"(sigma {sigma_x_pix.min():.2f}-{sigma_x_pix.max():.2f} pix in x)")
-
-    convolved_cube = cube.copy()
-    if np.all(kernel_fwhm == 0):
-        print("Source PSF at z_sim is broader than the target everywhere; no convolution.")
-        return convolved_cube
-    data = np.ma.getdata(cube.data).astype(float)
-    mask = np.ma.getmaskarray(cube.data)
-    good = np.isfinite(data) & ~mask
-    data = np.where(good, data, 0.0)
-    var = None
-    if cube.var is not None:
-        var = np.where(good, np.ma.getdata(cube.var).astype(float), 0.0)
-
-    def conv(img, ky, kx):
-        return correlate1d(correlate1d(img, ky, axis=0, mode="reflect"), kx, axis=1, mode="reflect")
-
-    for i in range(cube.shape[0]):
-        if kernel_fwhm[i] > 0:
-            ky, kx = gaussian_kernel1d(sigma_y_pix[i]), gaussian_kernel1d(sigma_x_pix[i])
-            # normalised convolution: bad pixels get no weight, and stay masked
-            w = conv(good[i].astype(float), ky, kx)
-            wsafe = np.where(w > 0, w, 1.0)
-            data[i] = conv(data[i], ky, kx) / wsafe
-            if var is not None:
-                # variance of a weighted sum: sum(k**2 v) (pixel covariance ignored)
-                var[i] = conv(var[i], ky ** 2, kx ** 2) / wsafe ** 2
-    convolved_cube.data = np.ma.array(data, mask=mask | ~good)
-    if var is not None:
-        convolved_cube.var = var
-    return convolved_cube
+    return psf_match_and_bin(cube, 1, 1, fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z_sim,
+                             background="zero", cosmo=cosmo)
