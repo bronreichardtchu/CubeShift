@@ -165,3 +165,23 @@ def test_file_bunit_parsed_or_kept_as_csbunit(tmp_path):
     with pytest.warns(UserWarning, match="CSBUNIT"):
         out, _ = redshift_wavelength_axis(_cube_file("odd.fits", "COUNTS/PIXEL/BANANA"), 0.0, 1.0)
     assert out.data_header["CSBUNIT"] == "COUNTS/PIXEL/BANANA"
+
+
+def test_surface_brightness_steps_carry_per_arcsec2_unit(mock_data_dir, quiet, tmp_path):
+    """Between steps 3 and 6 the values are per arcsec^2, and the saved cubes say so."""
+    import astropy.units as u
+    from mpdaf.obj import Cube
+
+    from cubeshift import simulate_observation
+    from cubeshift.testing import make_test_cube
+
+    flux_unit = u.Unit("1e-16 erg / (s cm2 Angstrom)")
+    c = make_test_cube()
+    c.unit = flux_unit
+    with quiet():
+        res = simulate_observation(c, 0.025, 3.0, "Keck_KCWI", "JWST_NIRSpec", data_dir=mock_data_dir,
+                                   output_dir=tmp_path, save_intermediates=True)
+    # step 3 output: surface brightness
+    assert Cube(res.intermediate_paths["fluxscaled"]).unit == flux_unit / u.arcsec ** 2
+    # step 6 output: back to flux per spaxel
+    assert Cube(res.intermediate_paths["rebinned_fluxscaled"]).unit == flux_unit

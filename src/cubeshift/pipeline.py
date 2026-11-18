@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+import astropy.units as u
 from astropy.cosmology import Planck18
 from mpdaf.obj import Cube
 
@@ -121,6 +122,8 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     scale_cube(redshifted_cube, flux_dimming_factor(z_obs, z_sim, cosmo=cosmo))
     redshifted_cube = shrink_to_redshift(redshifted_cube, z_obs, z_sim, cosmo=cosmo)
     scale_cube(redshifted_cube, 1.0 / get_spaxel_area(redshifted_cube))
+    # the values are now per arcsec^2, so say so in the unit (undone in step 6)
+    redshifted_cube.unit = redshifted_cube.unit / u.arcsec ** 2
     _save(redshifted_cube, "fluxscaled")
 
     # 4. filter throughput (in place)
@@ -136,6 +139,8 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
 
     # 6. surface brightness -> flux per binned spaxel (masked spaxels stay masked)
     scale_cube(cube_resampled, get_spaxel_area(cube_resampled))
+    # back to the input's flux unit, now per (larger) spaxel
+    cube_resampled.unit = cube_resampled.unit * u.arcsec ** 2
     _save(cube_resampled, "rebinned_fluxscaled")
 
     # 7. disperser: LSF from the source R to the grating's R(lambda) on the fine grid,
