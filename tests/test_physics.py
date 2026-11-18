@@ -324,6 +324,94 @@ def _moments(img):
     return yc, xc, 2.3548 * np.sqrt(var)
 
 
+@pytest.mark.parametrize("z_sim", [4.0, 6.0, 8.0])
+def test_psf_reaches_target_after_binning(quiet, z_sim):
+    """M3: the PSF used to be applied on the binned grid (0.77-0.90 of the target at z = 4-8).
+
+    A source with 1" KCWI seeing is shrunk to z_sim, blurred to the target PSF and binned.
+    Its PSF is then max(target, shrunk seeing).  The output is under-sampled (~1 output
+    pixel per FWHM), so the second moment is averaged over sub-pixel source positions,
+    where the output pixel adds exactly p_out^2/12 to sigma^2.
+    """
+    from cubeshift.psf import FWHM_TO_SIGMA, psf_match_and_bin
+
+    f_ang = cosmology.angular_scale_ratio(Z_OBS, z_sim)
+    pix = 0.29 * f_ang                                   # KCWI pixel at z_sim
+    b = int(round(NIRSPEC.pixel_scale_x / pix))
+    p_out = pix * b
+    target = float(NIRSPEC.psf_fwhm(35000.0))            # 0.113" (wider than the shrunk seeing)
+    sig_src = 1.0 * FWHM_TO_SIGMA / 0.29                 # 1" seeing in KCWI pixels
+
+    # average the measured sigma^2 over source positions within one output pixel
+    n = 61
+    variances = []
+    for dy in range(b):
+        for dx in range(b):
+            yy, xx = np.indices((n, n)) - (n - 1) / 2
+            img = np.exp(-((xx - dx) ** 2 + (yy - dy) ** 2) / (2 * sig_src ** 2))
+            with quiet():
+                out = psf_match_and_bin(_cube_from_image(img, pix), b, b, 1.0, target, Z_OBS, z_sim,
+                                        background="zero")
+            variances.append((_moments(out.data[0])[2] / 2.3548 * p_out) ** 2)
+
+    # expected: (target PSF or shrunk seeing, whichever is wider) + output pixel box
+    psf = max(target, 1.0 * f_ang)
+    expected = np.sqrt((psf * FWHM_TO_SIGMA) ** 2 + p_out ** 2 / 12)
+    assert np.sqrt(np.mean(variances)) == pytest.approx(expected, rel=0.03)
+
+
+def test_psf_and_bin_keeps_flux_with_wings(quiet):
+    """Zero padding keeps the PSF wings: a source at the field edge loses no flux."""
+    from cubeshift.psf import psf_match_and_bin
+
+    # bright source 2 pixels from the corner of a 40x40 field
+    img = np.zeros((40, 40))
+    img[2, 2] = 1.0
+    cube = _cube_from_image(img, 0.01)
+    with quiet():
+        out = psf_match_and_bin(cube, 4, 4, 0.0, 0.1, Z_OBS, Z_OBS, background="zero")
+    # total flux = sum(SB) x pixel area, before and after
+    flux_in = img.sum() * 0.01 ** 2
+    dx, dy = resample.pixel_scale_xy(out)
+    assert np.ma.sum(out.data) * dx * dy == pytest.approx(flux_in, rel=1e-6)
+
+
+def test_padding_rule():
+    """One pad: >= the blur margin per side, a multiple of b, the FOV if given, and the phase."""
+    from cubeshift.psf import _pad_amounts
+
+    # margin + divisibility
+    lo, hi = _pad_amounts(n=23, margin=5, b=4, fov_pixels=None, phase="center")
+    assert (23 + lo + hi) % 4 == 0 and lo >= 5 and hi >= 5
+    # field of view larger than the data: pad straight to it
+    lo, hi = _pad_amounts(n=23, margin=5, b=4, fov_pixels=120, phase="center")
+    assert 23 + lo + hi == 120
+    # phase moves the top-up from one side to the other
+    lo0, _ = _pad_amounts(n=23, margin=5, b=4, fov_pixels=None, phase=0)
+    lo3, _ = _pad_amounts(n=23, margin=5, b=4, fov_pixels=None, phase=3)
+    assert lo3 - lo0 == 3
+    with pytest.raises(ValueError):
+        _pad_amounts(n=23, margin=5, b=4, fov_pixels=None, phase=9)
+
+
+@pytest.mark.parametrize("fine_limit", [100000, 10])
+def test_fov_padding_paths_and_crop(quiet, fine_limit):
+    """Small b pads the FOV on the fine grid, large b on the coarse grid: same output size.
+    Data larger than the FOV are centre-cropped."""
+    from cubeshift.psf import psf_match_and_bin
+
+    img = np.zeros((40, 40))
+    img[20, 20] = 1.0
+    cube = _cube_from_image(img, 0.02)
+    with quiet():
+        out = psf_match_and_bin(cube, 5, 5, 0.0, 0.1, Z_OBS, Z_OBS, background="zero",
+                                fov=(3.0, 2.0), fine_fov_limit=fine_limit)
+    assert out.shape[1:] == (round(2.0 / 0.1), round(3.0 / 0.1))
+    with quiet():
+        small = psf_match_and_bin(cube, 5, 5, 0.0, 0.1, Z_OBS, Z_OBS, background="zero", fov=(0.4, 0.4))
+    assert small.shape[1:] == (4, 4)
+
+
 def test_background_modes():
     """'auto' finds sky in the border, or falls back to mean 0 + difference noise."""
     from cubeshift.padding import estimate_background
@@ -346,4 +434,62 @@ def test_background_modes():
     # explicit modes
     assert estimate_background(_cube_from_image(img, 0.02), "zero").noise[0] == 0
     assert estimate_background(_cube_from_image(img, 0.02), 2.5).mean[0] == 2.5
+
+
+def test_sky_positions_survive_padding_and_binning(quiet):
+    """M2: CRPIX used not to be shifted after FOV padding (sky positions off by the pad offset)."""
+    from cubeshift.psf import psf_match_and_bin
+
+    # off-centre source on a 30x30 grid
+    img = np.zeros((30, 30))
+    img[8:10, 20:22] = 1.0
+    cube = _cube_from_image(img, 0.0192)
+    yc, xc, _ = _moments(img)
+    sky_in = cube.wcs.pix2sky([yc, xc])[0]
+    with quiet():
+        out = psf_match_and_bin(cube, 5, 5, 0.0, 0.07, Z_OBS, Z_OBS, background="zero", fov=(3.0, 3.0))
+    yo, xo, _ = _moments(out.data[0])
+    # sky position of the output centroid, in output pixels
+    yo_exp, xo_exp = out.wcs.sky2pix(sky_in)[0]
+    assert abs(yo - yo_exp) < 0.05 and abs(xo - xo_exp) < 0.05
+
+
+def test_psf_and_bin_variance_monte_carlo(quiet):
+    """Blur-then-bin variance (sum_f H^2 v_f) matches the scatter of white-noise realisations,
+    including padding-only pixels (noise drawn into the padding before the blur)."""
+    from cubeshift.padding import BackgroundEstimate
+    from cubeshift.psf import psf_match_and_bin
+
+    rng = np.random.default_rng(6)
+    sims = []
+    for _ in range(150):
+        cube = _cube_from_image(rng.normal(0, 1, (48, 48)), 0.01, var=1.0)
+        bkg = BackgroundEstimate(np.zeros(1), np.ones(1), "user")      # padding noise = input noise
+        with quiet():
+            out = psf_match_and_bin(cube, 4, 4, 0.0, 0.06, Z_OBS, Z_OBS, background=bkg,
+                                    fov=(1.0, 1.0), rng=rng)
+        sims.append(np.ma.getdata(out.data)[0])
+    mc = np.array(sims).var(axis=0)
+    prop = np.ma.getdata(out.var)[0]
+    assert np.median(mc / prop) == pytest.approx(1.0, rel=0.1)
+
+
+def test_prebinning_matches_full_resolution(quiet, monkeypatch):
+    """Pre-binning (for large bin factors) gives the same FWHM (2%) and flux (1e-6)."""
+    import cubeshift.psf as psf_mod
+
+    img = np.zeros((96, 96))
+    img[47:49, 47:49] = 1.0
+    cube = _cube_from_image(img, 0.002)
+
+    # with pre-binning (q > 1 chosen automatically for a 0.1" kernel on 0.002" pixels)
+    with quiet():
+        fast = psf_mod.psf_match_and_bin(cube, 24, 24, 0.0, 0.1, Z_OBS, Z_OBS, background="zero")
+    # reference: force no pre-binning
+    monkeypatch.setattr(psf_mod, "_prebin_factor", lambda b, p, s: 1)
+    with quiet():
+        ref = psf_mod.psf_match_and_bin(cube, 24, 24, 0.0, 0.1, Z_OBS, Z_OBS, background="zero")
+
+    assert np.ma.sum(fast.data) == pytest.approx(np.ma.sum(ref.data), rel=1e-6)
+    assert _moments(fast.data[0])[2] == pytest.approx(_moments(ref.data[0])[2], rel=0.02)
 
