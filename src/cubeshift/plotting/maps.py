@@ -496,7 +496,7 @@ def get_fluxmap_vmin_vmax(all_flux_maps, lower=0.5, upper=99.5):
     return vmin, vmax
 
 def make_big_maps(cube, z_obs=0.025, redshifts=None,
-                  source_telescope="Keck_KCWI", target_telescope="JWST_NIRSpec",
+                  source_telescope="Keck_KCWI", simulated_telescope="JWST_NIRSpec",
                   **simulate_kwargs):
     """
     Plot 2x2 grids of [O III] flux maps, RGB maps and Hβ/Hγ ratio maps of a
@@ -510,7 +510,7 @@ def make_big_maps(cube, z_obs=0.025, redshifts=None,
         Observed redshift of the real galaxy.
     redshifts : sequence of float, optional
         Redshifts to show (up to 4 panels). Default ``[z_obs, 2.5, 3.0, 4.0]``.
-    source_telescope, target_telescope : str or Telescope
+    source_telescope, simulated_telescope : str or Telescope
         Instruments passed to :func:`cubeshift.pipeline.simulate_observation`
         (key of ``TELESCOPES`` or a Telescope instance).
     **simulate_kwargs
@@ -523,7 +523,7 @@ def make_big_maps(cube, z_obs=0.025, redshifts=None,
     if redshifts is None:
         redshifts = [z_obs, 2.5, 3.0, 4.0]
     source_telescope = _as_telescope(source_telescope)
-    target_telescope = _as_telescope(target_telescope)
+    simulated_telescope = _as_telescope(simulated_telescope)
     oiii_rest = 5007
     rest_waves=(4861, 5007, 4500) # Hβ 4861Å, [O III] 5007Å, Stellar Continuum ~4500Å
 
@@ -572,7 +572,7 @@ def make_big_maps(cube, z_obs=0.025, redshifts=None,
         else:
             try:
                 result = simulate_observation(
-                    cube, z_obs, z, source_telescope, target_telescope, **simulate_kwargs
+                    cube, z_obs, z, source_telescope, simulated_telescope, **simulate_kwargs
                 )
                 cube_z = result.cube
                 trans_filter_name = result.filter_name

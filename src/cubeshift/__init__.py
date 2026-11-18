@@ -5,7 +5,7 @@ Typical use::
     import cubeshift
     result = cubeshift.simulate_observation("cube.fits", z_obs=0.025, z_sim=3,
                                             source_telescope="Keck_KCWI",
-                                            target_telescope="JWST_NIRSpec",
+                                            simulated_telescope="JWST_NIRSpec",
                                             data_dir="path/to/jwst_files")
     result.cube.write("simulated.fits")
 

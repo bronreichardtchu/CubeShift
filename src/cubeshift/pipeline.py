@@ -62,7 +62,7 @@ def _check_simulated_telescope(telescope):
         raise ValueError(f"simulated telescope {telescope.name!r} needs fov_x and fov_y (arcsec)")
 
 
-def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope, *,
+def simulate_observation(cube, z_obs, z_sim, source_telescope, simulated_telescope, *,
                          data_dir=None, output_dir=None, galaxy_name=None, save_intermediates=False,
                          line_rest_wavelength=5007, noise_scale=1.0, rng=None, cosmo=Planck18,
                          background="auto"):
@@ -78,7 +78,7 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     5. Pad once (PSF margin, multiple of the bin factor, target FOV) with the
        background level and noise; on the fine grid, convolve from the source
        PSF (``source_telescope.spatial_fwhm``, shrunk to z_sim) to the target PSF
-       (``target_telescope.psf_fwhm(lambda)``); then bin to the target spaxels.
+       (``simulated_telescope.psf_fwhm(lambda)``); then bin to the target spaxels.
     6. Convert back to flux per (new) spaxel.
     7. Choose a NIRSpec disperser; on the native wavelength grid convolve from the
        source resolution (``source_telescope.spectral_resolution``) to the
@@ -90,7 +90,7 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
         Input cube (or FITS path), e.g. from Keck/KCWI.
     z_obs, z_sim : float
         Observed and simulated redshift.
-    source_telescope, target_telescope : Telescope or str
+    source_telescope, simulated_telescope : Telescope or str
         Instruments, as objects or keys of :data:`cubeshift.instruments.TELESCOPES`.
     data_dir : path-like, optional
         JWST filter/dispersion files (see :mod:`cubeshift.config`).
@@ -125,10 +125,10 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
         If the simulated telescope has no field of view (``fov_x``/``fov_y``).
     """
     source_telescope = _as_telescope(source_telescope)
-    target_telescope = _as_telescope(target_telescope)
+    simulated_telescope = _as_telescope(simulated_telescope)
     # fail before any work if the simulated telescope is not one the pipeline supports
-    _check_simulated_telescope(target_telescope)
-    print(f"Simulating observation as seen by {target_telescope.name} at z = {z_sim}")
+    _check_simulated_telescope(simulated_telescope)
+    print(f"Simulating observation as seen by {simulated_telescope.name} at z = {z_sim}")
 
     paths = {}
 
@@ -163,8 +163,8 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     # 5. pad once, match the PSF on the fine grid (source seeing shrunk to z_sim ->
     #    target PSF(lambda)), then bin to the target spaxels
     cube_resampled, bin_factors, _, _, _ = resample_cube_to_telescope_and_redshift(
-        transmission_cube, target_telescope, z_obs, z_sim, noise_scale=noise_scale, rng=rng, cosmo=cosmo,
-        fwhm_source_arcsec=source_telescope.spatial_fwhm, fwhm_target_arcsec=target_telescope.psf_fwhm,
+        transmission_cube, simulated_telescope, z_obs, z_sim, noise_scale=noise_scale, rng=rng, cosmo=cosmo,
+        fwhm_source_arcsec=source_telescope.spatial_fwhm, fwhm_target_arcsec=simulated_telescope.psf_fwhm,
         background=background)
 
     # 6. surface brightness -> flux per binned spaxel (masked spaxels stay masked)

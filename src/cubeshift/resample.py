@@ -46,7 +46,7 @@ def shrink_to_redshift(cube, z_source, z_target, cosmo=Planck18):
     return out
 
 
-def resampling_factors(cube, target_telescope, z_source=None, z_target=None, cosmo=Planck18):
+def resampling_factors(cube, simulated_telescope, z_source=None, z_target=None, cosmo=Planck18):
     """Raw (non-integer) spatial binning factors (s_x, s_y) = p_target / p_cube(z_target).
 
     If the cube's WCS is still at the source angular scale (no ``CSANGSCL``
@@ -60,10 +60,10 @@ def resampling_factors(cube, target_telescope, z_source=None, z_target=None, cos
             raise ValueError("cube is at the source angular scale; z_source and z_target are needed")
         f_ang = angular_scale_ratio(z_source, z_target, cosmo)
         dx, dy = dx * f_ang, dy * f_ang
-    return target_telescope.pixel_scale_x / dx, target_telescope.pixel_scale_y / dy
+    return simulated_telescope.pixel_scale_x / dx, simulated_telescope.pixel_scale_y / dy
 
 
-def resample_cube_to_telescope_and_redshift(cube, target_telescope, z_source, z_target, trim=True,
+def resample_cube_to_telescope_and_redshift(cube, simulated_telescope, z_source, z_target, trim=True,
                                             noise_scale=1.0, rng=None, cosmo=Planck18,
                                             fwhm_source_arcsec=None, fwhm_target_arcsec=None,
                                             background="auto", phase="center"):
@@ -85,7 +85,7 @@ def resample_cube_to_telescope_and_redshift(cube, target_telescope, z_source, z_
     Parameters
     ----------
     cube : mpdaf.obj.Cube
-    target_telescope : cubeshift.instruments.Telescope
+    simulated_telescope : cubeshift.instruments.Telescope
         Its ``fov_x``/``fov_y`` (if set) define the output field.
     z_source, z_target : float
         Observed and simulated redshift.
@@ -124,7 +124,7 @@ def resample_cube_to_telescope_and_redshift(cube, target_telescope, z_source, z_
             cube.var = cube.var / f2 ** 2
 
     # integer bin factors from the target pixel size
-    s_x, s_y = resampling_factors(cube, target_telescope)
+    s_x, s_y = resampling_factors(cube, simulated_telescope)
     bin_factor_x = max(1, int(round(s_x)))
     bin_factor_y = max(1, int(round(s_y)))
     print(f"Raw resampling factors: s_x = {s_x:.3f}, s_y = {s_y:.3f}; bins {bin_factor_x} x {bin_factor_y}")
@@ -133,8 +133,8 @@ def resample_cube_to_telescope_and_redshift(cube, target_telescope, z_source, z_
     if trim:
         cube = trim_empty_edges(cube)
     fov = None
-    if target_telescope.fov_x is not None and target_telescope.fov_y is not None:
-        fov = (target_telescope.fov_x, target_telescope.fov_y)
+    if simulated_telescope.fov_x is not None and simulated_telescope.fov_y is not None:
+        fov = (simulated_telescope.fov_x, simulated_telescope.fov_y)
     cube_resampled = psf_match_and_bin(
         cube, bin_factor_x, bin_factor_y, fwhm_source_arcsec, fwhm_target_arcsec, z_source, z_target,
         background=background, fov=fov, phase=phase, noise_scale=noise_scale, rng=rng, cosmo=cosmo)

@@ -50,7 +50,7 @@ result = cubeshift.simulate_observation(
     "cgcg453_red_mosaic.fits",          # path or mpdaf Cube
     z_obs=0.025, z_sim=3,
     source_telescope="Keck_KCWI",       # key of cubeshift.TELESCOPES, or a cubeshift.Telescope
-    target_telescope="JWST_NIRSpec",
+    simulated_telescope="JWST_NIRSpec",
     output_dir="Output_cubes", galaxy_name="CGCG453",
     save_intermediates=True,            # also write the cube after each step
 )
@@ -128,7 +128,8 @@ Old modules in `cubeshiftPipeline/mainPipeline/` and `cubeshift/` map to:
 
 | old | new |
 |---|---|
-| `main.simulate_observation(path, telescope_name, z_obs, z_sim, source, target, galaxy_name, check_numbers, return_final_cube_path)` | `cubeshift.simulate_observation(cube, z_obs, z_sim, source, target, *, data_dir, output_dir, galaxy_name, save_intermediates)` → `SimulationResult` |
+| `main.simulate_observation(path, telescope_name, z_obs, z_sim, source, target, galaxy_name, check_numbers, return_final_cube_path)` | `cubeshift.simulate_observation(cube, z_obs, z_sim, source_telescope, simulated_telescope, *, data_dir, output_dir, galaxy_name, save_intermediates)` → `SimulationResult` |
+| `simulate_observation(..., target_telescope=...)`, `--target-telescope` (scripts) | `simulated_telescope=...`, `--simulated-telescope` ("target" means the observed object) |
 | `main.test_Keck_to_JWST_full_pipeline` | `scripts/run_kcwi_to_nirspec.py` |
 | `binData.Telescope`, `binData.telescope_specs` | `cubeshift.instruments.Telescope`, `TELESCOPES` (alias `telescope_specs`) |
 | `binData.bin_cube(x, y, cube, ...)` (pipeline) | `cubeshift.binning.bin_data(x, y, cube, ..., surface_brightness=True)` |
