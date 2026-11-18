@@ -298,6 +298,7 @@ def test_padding_variance_matches_padding_noise(quiet):
     assert np.std(np.ma.getdata(cr.data)[k][pad]) == pytest.approx(np.sqrt(np.ma.getdata(cr.var)[k][pad].mean()),
                                                                     rel=0.1)
 
+
 # --- review v2: PSF before binning (M3), single padding, background (M1), WCS (M2) ------
 def _cube_from_image(img, pix_arcsec, nw=1, var=None, crpix=None):
     """Synthetic cube with the same image in every slice, WCS already 'at z_sim' (flagged)."""
@@ -436,6 +437,31 @@ def test_background_modes():
     assert estimate_background(_cube_from_image(img, 0.02), 2.5).mean[0] == 2.5
 
 
+def test_padding_is_background_not_galaxy_light(quiet):
+    """M1: the padding mean used to come from background() of galaxy-filled slices
+    (2.7x the galaxy's line flux).  Now it is the sky level (here ~0)."""
+    rng = np.random.default_rng(4)
+    yy, xx = np.indices((30, 30)) - 14.5
+    # extended galaxy (reaching ~4 sigma at the field edge) on zero-mean sky noise 0.01
+    img = 1.0 * np.exp(-(xx ** 2 + yy ** 2) / (2 * 6 ** 2)) + rng.normal(0, 0.01, (30, 30))
+    cube = _cube_from_image(img, 0.0192, var=0.01 ** 2)
+    with quiet():
+        out, _, _, _, _ = resample.resample_cube_to_telescope_and_redshift(
+            cube, NIRSPEC, Z_OBS, Z_SIM, rng=np.random.default_rng(5))
+
+    # padding pixels = outside the original footprint recorded in the header
+    h = out.data_header
+    pad = np.ones(out.shape[1:], bool)
+    pad[h["PADY0"]:h["PADY0"] + h["PADNY"], h["PADX0"]:h["PADX0"] + h["PADNX"]] = False
+    data = np.ma.getdata(out.data)[0]
+
+    # padding level within 1 sky sigma of zero, and its total far below the galaxy's
+    assert abs(data[pad].mean()) < 0.01
+    assert abs(data[pad].sum()) < 0.05 * data[~pad].sum()
+    # scatter consistent with the variance assigned to the padding
+    assert data[pad].std() == pytest.approx(np.sqrt(np.ma.getdata(out.var)[0][pad].mean()), rel=0.2)
+
+
 def test_sky_positions_survive_padding_and_binning(quiet):
     """M2: CRPIX used not to be shifted after FOV padding (sky positions off by the pad offset)."""
     from cubeshift.psf import psf_match_and_bin
@@ -492,4 +518,3 @@ def test_prebinning_matches_full_resolution(quiet, monkeypatch):
 
     assert np.ma.sum(fast.data) == pytest.approx(np.ma.sum(ref.data), rel=1e-6)
     assert _moments(fast.data[0])[2] == pytest.approx(_moments(ref.data[0])[2], rel=0.02)
-

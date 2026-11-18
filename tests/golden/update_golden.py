@@ -57,18 +57,17 @@ def chain(data_dir):
     res["s4_filter"] = np.array(filt)
     np.random.seed(SEED)
     with quiet():
-        cr, bf, _, dx, dy = resample.resample_cube_to_telescope_and_redshift(tc, nirspec, Z_OBS, Z_SIM)
+        cr, bf, _, dx, dy = resample.resample_cube_to_telescope_and_redshift(
+            tc, nirspec, Z_OBS, Z_SIM, fwhm_source_arcsec=TELESCOPES["Keck_KCWI"].spatial_fwhm,
+            fwhm_target_arcsec=nirspec.psf_fwhm)
     res.update(snap(cr, "s5_resampled_"))
     res["s5_bin_factors"] = np.asarray(bf)
     res["s5_dxdy"] = np.asarray([dx, dy])
     cosmology.scale_cube(cr, resample.get_spaxel_area(cr))
     res.update(snap(cr, "s6_flux_"))
     with quiet():
-        cp = psf.convolve_to_match_psf(cr, TELESCOPES["Keck_KCWI"].spatial_fwhm, nirspec.psf_fwhm, Z_OBS, Z_SIM)
-    res.update(snap(cp, "s7_psf_"))
-    with quiet():
         bl, disp = spectral.apply_dispersion_pipeline(
-            cp, source_resolution=TELESCOPES["Keck_KCWI"].spectral_resolution, data_dir=data_dir)
+            cr, source_resolution=TELESCOPES["Keck_KCWI"].spectral_resolution, data_dir=data_dir)
     res.update(snap(bl, "s8_disp_"))   # final cube (the old step 9 was removed)
     res["s8_disperser"] = np.array(disp)
     return res

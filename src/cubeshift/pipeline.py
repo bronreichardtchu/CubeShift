@@ -9,7 +9,6 @@ from mpdaf.obj import Cube
 
 from .cosmology import flux_dimming_factor, scale_cube
 from .instruments import TELESCOPES, Telescope
-from .psf import convolve_to_match_psf
 from .redshift import redshift_wavelength_axis
 from .resample import get_spaxel_area, resample_cube_to_telescope_and_redshift, shrink_to_redshift
 from .spectral import apply_dispersion_pipeline
@@ -44,7 +43,8 @@ def _as_telescope(t):
 
 def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope, *,
                          data_dir=None, output_dir=None, galaxy_name=None, save_intermediates=False,
-                         line_rest_wavelength=5007, noise_scale=1.0, rng=None, cosmo=Planck18):
+                         line_rest_wavelength=5007, noise_scale=1.0, rng=None, cosmo=Planck18,
+                         background="auto"):
     """Simulate how a cube would look observed with another telescope at another redshift.
 
     Steps
@@ -54,11 +54,12 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
        spatial WCS to the angular scale of z_sim (D_A(z_obs)/D_A(z_sim)).
     3. Convert flux to surface brightness (per arcsec^2 at z_sim).
     4. Apply the NIRSpec filter throughput for ``line_rest_wavelength``.
-    5. Bin to the target spaxels at z_sim and pad to the target FOV.
+    5. Pad once (PSF margin, multiple of the bin factor, target FOV) with the
+       background level and noise; on the fine grid, convolve from the source
+       PSF (``source_telescope.spatial_fwhm``, shrunk to z_sim) to the target PSF
+       (``target_telescope.psf_fwhm(lambda)``); then bin to the target spaxels.
     6. Convert back to flux per (new) spaxel.
-    7. Convolve from the source PSF (``source_telescope.spatial_fwhm``, shrunk to
-       z_sim) to the target PSF (``target_telescope.psf_fwhm(lambda)``).
-    8. Choose a NIRSpec disperser; on the native wavelength grid convolve from the
+    7. Choose a NIRSpec disperser; on the native wavelength grid convolve from the
        source resolution (``source_telescope.spectral_resolution``) to the
        disperser's R(lambda); rebin (flux-conserving) onto the disperser's grid.
 
@@ -82,7 +83,11 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     line_rest_wavelength : float
         Rest wavelength (Angstrom) of the line that sets the filter choice.
     noise_scale : float
-        Multiplier on the background noise used to pad to the target FOV.
+        Multiplier on the background noise used for the padding.
+    background : 'auto', 'zero' or number
+        Level and noise of the padding: 'auto' measures them from sky pixels in
+        the border of the field, or uses mean 0 if the galaxy fills the field
+        (see :func:`cubeshift.padding.estimate_background`).
     rng : numpy.random.Generator, optional
         Random generator for the padding noise.
 
@@ -122,23 +127,21 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     transmission_cube, filter_name = apply_transmission_filter(
         redshifted_cube, z_sim, line_rest_wavelength, data_dir=data_dir)
 
-    # 5. spatial binning + FOV padding
+    # 5. pad once, match the PSF on the fine grid (source seeing shrunk to z_sim ->
+    #    target PSF(lambda)), then bin to the target spaxels
     cube_resampled, bin_factors, _, _, _ = resample_cube_to_telescope_and_redshift(
-        transmission_cube, target_telescope, z_obs, z_sim, noise_scale=noise_scale, rng=rng, cosmo=cosmo)
+        transmission_cube, target_telescope, z_obs, z_sim, noise_scale=noise_scale, rng=rng, cosmo=cosmo,
+        fwhm_source_arcsec=source_telescope.spatial_fwhm, fwhm_target_arcsec=target_telescope.psf_fwhm,
+        background=background)
 
     # 6. surface brightness -> flux per binned spaxel (masked spaxels stay masked)
     scale_cube(cube_resampled, get_spaxel_area(cube_resampled))
     _save(cube_resampled, "rebinned_fluxscaled")
 
-    # 7. PSF matching: source seeing (shrunk to z_sim) -> target PSF(lambda)
-    cube_psf = convolve_to_match_psf(cube_resampled, source_telescope.spatial_fwhm, target_telescope.psf_fwhm,
-                                     z_obs=z_obs, z_sim=z_sim, cosmo=cosmo)
-    _save(cube_psf, f"{filter_name}_psf")
-
-    # 8. disperser: LSF from the source R to the grating's R(lambda) on the fine grid,
+    # 7. disperser: LSF from the source R to the grating's R(lambda) on the fine grid,
     #    then flux-conserving rebin onto the grating's wavelength grid
     final_cube, disperser = apply_dispersion_pipeline(
-        cube_psf, source_resolution=source_telescope.spectral_resolution, data_dir=data_dir)
+        cube_resampled, source_resolution=source_telescope.spectral_resolution, data_dir=data_dir)
     final_path = _save(final_cube, f"{filter_name}_{disperser}_lsf", final=True)
 
     return SimulationResult(cube=final_cube, filter_name=filter_name, disperser=disperser,
