@@ -297,3 +297,53 @@ def test_padding_variance_matches_padding_noise(quiet):
     k = cr.shape[0] // 2
     assert np.std(np.ma.getdata(cr.data)[k][pad]) == pytest.approx(np.sqrt(np.ma.getdata(cr.var)[k][pad].mean()),
                                                                     rel=0.1)
+
+# --- review v2: PSF before binning (M3), single padding, background (M1), WCS (M2) ------
+def _cube_from_image(img, pix_arcsec, nw=1, var=None, crpix=None):
+    """Synthetic cube with the same image in every slice, WCS already 'at z_sim' (flagged)."""
+    from mpdaf.obj import WCS, Cube, WaveCoord
+
+    ny, nx = img.shape
+    data = np.repeat(img[None], nw, axis=0)
+    cube = Cube(data=data, var=None if var is None else np.full(data.shape, var),
+                wcs=WCS(crval=(10.0, 10.0), cdelt=(pix_arcsec / 3600, -pix_arcsec / 3600),
+                        crpix=crpix or (ny / 2, nx / 2), shape=(ny, nx), deg=True),
+                wave=WaveCoord(crval=20000.0, cdelt=100.0, crpix=1, cunit="Angstrom", shape=nw))
+    # mark the WCS as already at the z_sim angular scale
+    cube.data_header[resample.ANGSCALE_KEY] = 1.0
+    return cube
+
+
+def _moments(img):
+    """Centroid (y, x) and second-moment FWHM (in pixels, averaged over x and y)."""
+    img = np.ma.filled(img, 0.0)
+    y, x = np.indices(img.shape)
+    tot = img.sum()
+    yc, xc = (img * y).sum() / tot, (img * x).sum() / tot
+    var = (img * ((x - xc) ** 2 + (y - yc) ** 2)).sum() / tot / 2
+    return yc, xc, 2.3548 * np.sqrt(var)
+
+
+def test_background_modes():
+    """'auto' finds sky in the border, or falls back to mean 0 + difference noise."""
+    from cubeshift.padding import estimate_background
+
+    rng = np.random.default_rng(3)
+    yy, xx = np.indices((40, 40)) - 19.5
+
+    # compact galaxy on sky with mean 0.05 and noise 0.1: source 'sky'
+    img = 5 * np.exp(-(xx ** 2 + yy ** 2) / (2 * 3 ** 2)) + 0.05 + rng.normal(0, 0.1, (40, 40))
+    bkg = estimate_background(_cube_from_image(img, 0.02))
+    assert bkg.source == "sky"
+    assert bkg.mean[0] == pytest.approx(0.05, abs=0.02) and bkg.noise[0] == pytest.approx(0.1, rel=0.15)
+
+    # galaxy filling the field: source 'diff', mean 0, noise from neighbour differences
+    img = 10 * np.exp(-(xx ** 2 + yy ** 2) / (2 * 60 ** 2)) + rng.normal(0, 0.1, (40, 40))
+    bkg = estimate_background(_cube_from_image(img, 0.02))
+    assert bkg.source == "diff" and bkg.mean[0] == 0
+    assert bkg.noise[0] == pytest.approx(0.1, rel=0.1)
+
+    # explicit modes
+    assert estimate_background(_cube_from_image(img, 0.02), "zero").noise[0] == 0
+    assert estimate_background(_cube_from_image(img, 0.02), 2.5).mean[0] == 2.5
+
