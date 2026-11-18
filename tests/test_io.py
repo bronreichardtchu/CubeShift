@@ -90,3 +90,29 @@ def test_unnamed_extension_is_not_taken_as_variance(tmp_path):
     with pytest.warns(UserWarning, match="no variance extension"):
         _, _, var, _ = io.read_in_data(str(path))
     assert var is None
+
+
+# --- M6: Cube inputs use cube.wcs ------------------------------------------------------
+
+def test_redshift_uses_cube_wcs_not_primary_header():
+    """A Cube whose WCS is only in cube.wcs (MUSE files, in-memory cubes) keeps that WCS.
+
+    The wavelength reference pixel is not the first one, so this also checks
+    that the redshifted axis is lam_old * (1 + z_sim) / (1 + z_obs) everywhere.
+    """
+    from mpdaf.obj import WCS, Cube, WaveCoord
+
+    from cubeshift.redshift import redshift_wavelength_axis
+
+    # empty primary header; spatial WCS only on the object
+    wcs = WCS(crval=(-37.7, 13.7), cdelt=(0.2 / 3600, -0.2 / 3600), crpix=(2, 3), shape=(4, 6), deg=True)
+    wave = WaveCoord(crval=5000.0, cdelt=1.25, crpix=3, cunit="Angstrom")
+    c = Cube(data=np.ones((5, 4, 6)), wcs=wcs, wave=wave)
+    assert "CDELT1" not in c.primary_header and "CD1_1" not in c.primary_header
+
+    out, lam_new = redshift_wavelength_axis(c, 0.0, 1.0)
+    # same sky position at every pixel, same pixel size
+    assert out.wcs.isEqual(c.wcs)
+    # the whole axis is stretched by (1 + 1) / (1 + 0) = 2
+    np.testing.assert_allclose(out.wave.coord(), 2.0 * c.wave.coord())
+    np.testing.assert_allclose(lam_new, 2.0 * c.wave.coord())

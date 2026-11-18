@@ -24,8 +24,9 @@ def redshift_wavelength_axis(filename, z_obs, z_sim, pixscale_arcsec=None, keep_
     z_sim : float
         Redshift to simulate.
     pixscale_arcsec : float or (float, float), optional
-        Spatial pixel scale (arcsec/pix), used ONLY if the header lacks a
-        spatial WCS.  A single float is applied to both axes.
+        Spatial pixel scale (arcsec/pix), used ONLY if there is no spatial WCS
+        (``cube.wcs`` for a Cube, the header for a file).  A single float is
+        applied to both axes.
     keep_ra_negative : bool
         If building a WCS, use the conventional negative CDELT1 for RA.
 
@@ -38,20 +39,38 @@ def redshift_wavelength_axis(filename, z_obs, z_sim, pixscale_arcsec=None, keep_
     if header is None:
         header = fits.Header()
 
-    lam_new = lam_old * (1.0 + z_sim) / (1.0 + z_obs)
+    # every wavelength is stretched by the same factor
+    stretch = (1.0 + z_sim) / (1.0 + z_obs)
+    lam_new = lam_old * stretch
 
-    # Wavelength unit from the header if present, else Angstrom
-    wave_unit = header.get("CUNIT3") or header.get("WCSDIM3") or "Angstrom"
-    wave = WaveCoord(crval=lam_new[0], cdelt=np.median(np.diff(lam_new)), crpix=1,
-                     cunit=wave_unit, ctype="WAVE")
+    if isinstance(filename, Cube):
+        # Cube input: its WaveCoord already knows the reference pixel and unit, so
+        # scaling CRVAL and CDELT by the stretch gives exactly lam_old * stretch
+        wave = filename.wave.copy()
+        wave.set_crval(filename.wave.get_crval() * stretch)
+        wave.set_step(filename.wave.get_step() * stretch)
+    else:
+        # FITS input: build a linear axis from the (CRPIX3-aware) wavelengths,
+        # with the unit from the header if present, else Angstrom
+        wave_unit = header.get("CUNIT3") or header.get("WCSDIM3") or "Angstrom"
+        wave = WaveCoord(crval=lam_new[0], cdelt=np.median(np.diff(lam_new)), crpix=1,
+                         cunit=wave_unit, ctype="WAVE")
 
-    # Spatial WCS: reuse the header's if it has one (keeps CD/PC matrix, rotation)
+    # Spatial WCS for a Cube: its own WCS object (review v2 M6).  mpdaf keeps the
+    # WCS in the data extension, so the primary header of a MUSE file or of a
+    # cube built in memory has none.  A Cube made without a WCS has wcs None.
+    cube_wcs = filename.wcs if isinstance(filename, Cube) else None
+
+    # Spatial WCS for a file: reuse the header's if it has one (keeps CD/PC matrix, rotation)
     has_spatial = (("CDELT1" in header or "CD1_1" in header or "PC1_1" in header) and
                    ("CDELT2" in header or "CD2_2" in header or "PC2_2" in header))
 
-    if has_spatial:
+    if cube_wcs is not None:
+        wcs_spatial = cube_wcs.copy()
+    elif has_spatial:
         wcs_spatial = MPDAF_WCS(header)
     else:
+        # no WCS anywhere: build a simple TAN WCS from the given pixel scale
         if pixscale_arcsec is None:
             raise ValueError(
                 "Input header has no spatial WCS (no CDELT/CD/PC keywords). "
