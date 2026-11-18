@@ -97,8 +97,9 @@ Each takes `--help`.
 | `cubeshift.redshift` | `redshift_wavelength_axis`, `air_to_vac` |
 | `cubeshift.cosmology` | `rescale_flux`, angular/physical scales |
 | `cubeshift.binning` | `bin_data` (sum/mean/median, flux or surface brightness), `bin_list_of_cubes` |
-| `cubeshift.resample` | `resample_cube_to_telescope_and_redshift`, `pad_cube_with_background`, `get_spaxel_area` |
-| `cubeshift.psf` | `convolve_to_match_psf` |
+| `cubeshift.resample` | `resample_cube_to_telescope_and_redshift`, `shrink_to_redshift`, `get_spaxel_area` |
+| `cubeshift.psf` | `psf_match_and_bin` (pad once, blur on the fine grid, then bin), `convolve_to_match_psf` |
+| `cubeshift.padding` | `estimate_background` (sky from the field border, or mean 0 if the galaxy fills it), `pad_to_shape`, `crop_to_shape` |
 | `cubeshift.spectral` | disperser selection, `resample_spectral_axis`, LSF matching, `apply_dispersion_pipeline` |
 | `cubeshift.throughput` | NIRSpec filter selection and throughput |
 | `cubeshift.extinction` | Milky Way extinction (CCM89) |
