@@ -183,7 +183,7 @@ def bin_data(x_factor: int, y_factor: int, data_cube: Cube | Image, margin: str 
     Raises
     ------
     ValueError
-        Unsupported ``margin``/``method``, or factors outside 1..shape-1.
+        Unsupported ``margin``/``method``, or factors outside 1..shape.
     """
     data_cube = data_cube if inplace else data_cube.copy()
 
@@ -193,7 +193,7 @@ def bin_data(x_factor: int, y_factor: int, data_cube: Cube | Image, margin: str 
         raise ValueError(f"Unknown binning method: {method}")
 
     factor = _reduction_factor_to_array(x_factor, y_factor, data_cube)
-    if np.any(factor < 1) or np.any(factor >= data_cube.shape):
+    if np.any(factor < 1) or np.any(factor > data_cube.shape):
         raise ValueError("The reduction factors must be from 1 to shape")
 
     num_extra_pixels = _compute_num_of_extra_pixels(factor, data_cube)

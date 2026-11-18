@@ -11,7 +11,8 @@ Typical use::
 
 Modules
 -------
-pipeline      simulate_observation (the full chain)
+pipeline      simulate_observation (IFU cubes, e.g. KCWI -> NIRSpec)
+imaging       simulate_image_observation (broadband images, same filter, e.g. HST -> HST)
 redshift      wavelength-axis redshifting, air_to_vac
 cosmology     flux dimming and angular scales
 binning       integer spatial binning (bin_data)
@@ -28,10 +29,12 @@ testing       synthetic cubes and mock instrument files
 analysis      line fluxes, Balmer decrement, SFR
 plotting      maps, spectra, RGB images
 """
+from .imaging import ImageSimulationResult, simulate_image_observation
 from .instruments import TELESCOPES, Telescope
-from .io import read_cube
+from .io import read_cube, read_hst_image
 from .pipeline import SimulationResult, simulate_observation
 
 __version__ = "0.1.0"
 
-__all__ = ["simulate_observation", "SimulationResult", "Telescope", "TELESCOPES", "read_cube"]
+__all__ = ["simulate_observation", "SimulationResult", "simulate_image_observation", "ImageSimulationResult",
+           "Telescope", "TELESCOPES", "read_cube", "read_hst_image"]

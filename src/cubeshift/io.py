@@ -45,6 +45,51 @@ def read_fits(filename: str, ext=None) -> Cube | Image:
     raise ValueError(f"Expected a 2D image or 3D cube, {filename} has {ndim} axes")
 
 
+#: Primary-header keywords copied onto HST images read with :func:`read_hst_image`.
+HST_PRIMARY_KEYS = ("TELESCOP", "INSTRUME", "DETECTOR", "FILTER", "FILTER1", "FILTER2", "TARGNAME",
+                    "EXPTIME")
+
+
+def read_hst_image(path, sci_ext="SCI", wht_ext="WHT", var=None) -> Image:
+    """Read an HST drizzled image (``_drz``/``_drc``) into an mpdaf Image.
+
+    Pixels with WHT <= 0 (no coverage) or non-finite values are masked.  The
+    photometry keywords of the SCI header (BUNIT, PHOTFLAM, PHOTPLAM, ...) are
+    kept in ``data_header``, and the main primary-header keywords (instrument,
+    filter, target, exposure time) are copied there too.
+
+    Parameters
+    ----------
+    path : str
+    sci_ext, wht_ext : str or int
+        Science and weight extensions; ``wht_ext=None`` skips the weight mask.
+    var : np.ndarray, optional
+        Variance image, if known.  None by default: a drizzled WHT is usually an
+        exposure-time map, not an inverse variance.
+    """
+    from mpdaf.obj import WCS as MPDAF_WCS
+
+    with fits.open(str(path)) as hdul:
+        primary = hdul[0].header.copy()
+        sci_header = hdul[sci_ext].header.copy()
+        data = np.asarray(hdul[sci_ext].data, dtype=float)
+        wht = None if wht_ext is None else np.asarray(hdul[wht_ext].data)
+    mask = ~np.isfinite(data)
+    if wht is not None:
+        mask |= wht <= 0
+    # mpdaf cannot represent HST units (e.g. ELECTRONS/S) in FITS, so the data are
+    # kept unitless in mpdaf; the original unit is kept as CSBUNIT (mpdaf
+    # rewrites BUNIT on writing)
+    if "BUNIT" in sci_header:
+        sci_header["CSBUNIT"] = (sci_header["BUNIT"], "original BUNIT of the input image")
+    image = Image(data=np.ma.array(data, mask=mask), var=var, wcs=MPDAF_WCS(sci_header),
+                  data_header=sci_header, primary_header=primary, copy=False)
+    for key in HST_PRIMARY_KEYS:
+        if key in primary and key not in image.data_header:
+            image.data_header[key] = primary[key]
+    return image
+
+
 def read_cube(cube_or_path, ext=None) -> Cube:
     """Return an mpdaf Cube, reading it from disk if a path is given."""
     if isinstance(cube_or_path, Cube):
