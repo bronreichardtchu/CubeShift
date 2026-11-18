@@ -1,5 +1,6 @@
 """Reading cubes from FITS files and mpdaf objects (review v2 I/O items M5, M6, M13, M14)."""
 import numpy as np
+import pytest
 from astropy.io import fits
 
 from cubeshift import io
@@ -33,3 +34,59 @@ def test_wavelength_axis_has_naxis3_elements(tmp_path):
     lam, data, _, _ = io.read_in_data(str(path))
     assert lam.shape == (3,) == data.shape[:1]
     np.testing.assert_allclose(lam, [1.0, 1.1, 1.2])
+
+
+# --- M5: variance chosen by EXTNAME ----------------------------------------------------
+
+def _spectral_header():
+    """A minimal spectral WCS so read_in_data takes the HDU as the data."""
+    hdr = fits.Header()
+    hdr["CRVAL3"], hdr["CDELT3"], hdr["CRPIX3"] = 5000.0, 1.0, 1.0
+    return hdr
+
+
+def test_muse_layout_variance_is_stat_not_data(tmp_path):
+    """Empty primary, DATA, STAT: the old positional rule returned DATA as the variance."""
+    data = np.full((4, 2, 3), 10.0)
+    stat = np.full((4, 2, 3), 2.5)
+    path = tmp_path / "muse.fits"
+    fits.HDUList([fits.PrimaryHDU(),
+                  fits.ImageHDU(data, header=_spectral_header(), name="DATA"),
+                  fits.ImageHDU(stat, name="STAT")]).writeto(path)
+    _, d, var, _ = io.read_in_data(str(path))
+    np.testing.assert_array_equal(d, data)
+    np.testing.assert_array_equal(var, stat)
+
+
+def test_kcwi_layout_uncertainty_is_squared_and_mask_skipped(tmp_path):
+    """Flux in the primary, then MASK and UNCERT (sigma): var = UNCERT**2."""
+    data = np.full((4, 2, 3), 10.0)
+    sigma = np.full((4, 2, 3), 3.0)
+    path = tmp_path / "kcwi.fits"
+    fits.HDUList([fits.PrimaryHDU(data, header=_spectral_header()),
+                  fits.ImageHDU(np.zeros((4, 2, 3), dtype=np.int16), name="MASK"),
+                  fits.ImageHDU(sigma, name="UNCERT")]).writeto(path)
+    _, _, var, _ = io.read_in_data(str(path))
+    np.testing.assert_allclose(var, 9.0)
+
+
+def test_inverse_variance_is_inverted(tmp_path):
+    """IVAR -> 1/IVAR; ivar = 0 means no information and becomes NaN."""
+    ivar = np.full((4, 2, 3), 0.25)
+    ivar[0, 0, 0] = 0.0
+    path = tmp_path / "ivar.fits"
+    fits.HDUList([fits.PrimaryHDU(np.ones((4, 2, 3)), header=_spectral_header()),
+                  fits.ImageHDU(ivar, name="IVAR")]).writeto(path)
+    _, _, var, _ = io.read_in_data(str(path))
+    assert np.isnan(var[0, 0, 0])
+    np.testing.assert_allclose(var.ravel()[1:], 4.0)
+
+
+def test_unnamed_extension_is_not_taken_as_variance(tmp_path):
+    """An extension with no recognised EXTNAME is reported, not guessed."""
+    path = tmp_path / "unnamed.fits"
+    fits.HDUList([fits.PrimaryHDU(np.ones((4, 2, 3)), header=_spectral_header()),
+                  fits.ImageHDU(np.ones((4, 2, 3)))]).writeto(path)
+    with pytest.warns(UserWarning, match="no variance extension"):
+        _, _, var, _ = io.read_in_data(str(path))
+    assert var is None

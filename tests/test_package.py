@@ -36,6 +36,9 @@ def test_read_in_data_always_four_values(tmp_path):
     c.write(str(path))
     lam, data, var, hdr = io.read_in_data(str(path))
     assert data.shape == (6, 4, 5) and var is not None
+    # the STAT extension, not the DATA one (review v2 M5); mpdaf writes it as
+    # float32, and these tiny test variances are denormal there, hence rtol
+    np.testing.assert_allclose(var, c.var, rtol=1e-3)
     np.testing.assert_allclose(lam, c.wave.coord())
 
 
