@@ -89,6 +89,22 @@ def test_unknown_telescope():
         cubeshift.simulate_observation(make_test_cube(), 0.025, 3.0, "Keck_KCWI", "Hubble")
 
 
+def test_non_nirspec_simulated_telescope_fails_early_and_clearly():
+    """MUSE -> MUSE used to fail at the filter step with 'No NIRSpec filter mode covers ...' (M15)."""
+    with pytest.raises(NotImplementedError, match="can only simulate JWST NIRSpec"):
+        cubeshift.simulate_observation(make_test_cube(), 0.025, 0.05, "VLT_MUSE", "VLT_MUSE")
+
+
+def test_simulated_telescope_without_fov_fails_early():
+    """A NIRSpec-like simulated telescope without fov_x/fov_y is rejected before any work."""
+    from cubeshift.instruments import Telescope
+
+    nirspec_no_fov = Telescope("NIRSpec no FOV", spatial_fwhm=0.07, pixel_scale_x=0.1, pixel_scale_y=0.1,
+                               spectral_resolution=1000)
+    with pytest.raises(ValueError, match="fov_x and fov_y"):
+        cubeshift.simulate_observation(make_test_cube(), 0.025, 3.0, "Keck_KCWI", nirspec_no_fov)
+
+
 def test_redshift_builds_wcs_from_pixscale():
     """Header without a spatial WCS + pixscale_arcsec (mpdaf takes (y, x) order, no cunit/ctype)."""
     from mpdaf.obj import Cube, WaveCoord

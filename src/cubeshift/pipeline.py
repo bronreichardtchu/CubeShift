@@ -42,6 +42,26 @@ def _as_telescope(t):
         raise KeyError(f"Unknown telescope {t!r}; choose from {list(TELESCOPES)} or pass a Telescope") from None
 
 
+def _check_simulated_telescope(telescope):
+    """Raise early, with a clear message, for a simulated telescope the pipeline cannot handle.
+
+    Steps 4 and 7 choose a NIRSpec filter and grating from the NIRSpec tables
+    whatever the simulated telescope is, so any other instrument failed late with
+    a confusing message, e.g. "No NIRSpec filter mode covers 0.551 um" for
+    MUSE -> MUSE (review v2 M15).
+    """
+    # only NIRSpec has filter/disperser tables (instruments.NIRSPEC_*)
+    if "nirspec" not in telescope.name.lower():
+        raise NotImplementedError(
+            f"simulate_observation can only simulate JWST NIRSpec observations (simulated telescope "
+            f"{telescope.name!r}): the filter and disperser steps use the NIRSpec tables. Use the "
+            "individual steps in cubeshift.resample / cubeshift.psf / cubeshift.spectral for other "
+            "instruments.")
+    # step 5 pads or crops to the simulated telescope's field of view
+    if telescope.fov_x is None or telescope.fov_y is None:
+        raise ValueError(f"simulated telescope {telescope.name!r} needs fov_x and fov_y (arcsec)")
+
+
 def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope, *,
                          data_dir=None, output_dir=None, galaxy_name=None, save_intermediates=False,
                          line_rest_wavelength=5007, noise_scale=1.0, rng=None, cosmo=Planck18,
@@ -95,9 +115,19 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, target_telescope,
     Returns
     -------
     SimulationResult
+
+    Raises
+    ------
+    NotImplementedError
+        If the simulated telescope is not JWST NIRSpec (the only instrument with
+        filter and disperser tables so far).
+    ValueError
+        If the simulated telescope has no field of view (``fov_x``/``fov_y``).
     """
     source_telescope = _as_telescope(source_telescope)
     target_telescope = _as_telescope(target_telescope)
+    # fail before any work if the simulated telescope is not one the pipeline supports
+    _check_simulated_telescope(target_telescope)
     print(f"Simulating observation as seen by {target_telescope.name} at z = {z_sim}")
 
     paths = {}
