@@ -59,7 +59,7 @@ def chain(data_dir):
     with quiet():
         cr, bf, _, dx, dy = resample.resample_cube_to_telescope_and_redshift(
             tc, nirspec, Z_OBS, Z_SIM, fwhm_source_arcsec=TELESCOPES["Keck_KCWI"].spatial_fwhm,
-            fwhm_target_arcsec=nirspec.psf_fwhm)
+            fwhm_simulated_arcsec=nirspec.psf_fwhm)
     res.update(snap(cr, "s5_resampled_"))
     res["s5_bin_factors"] = np.asarray(bf)
     res["s5_dxdy"] = np.asarray([dx, dy])

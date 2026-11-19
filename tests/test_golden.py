@@ -76,7 +76,7 @@ def test_pipeline_chain(golden_chain, mock_data_dir, quiet):
     with quiet():
         cr, bf, _, dx, dy = resample.resample_cube_to_telescope_and_redshift(
             tc, nirspec, Z_OBS, Z_SIM, fwhm_source_arcsec=TELESCOPES["Keck_KCWI"].spatial_fwhm,
-            fwhm_target_arcsec=nirspec.psf_fwhm)
+            fwhm_simulated_arcsec=nirspec.psf_fwhm)
     # padding noise is float32 in the original code
     assert_matches(cr, g, "s5_resampled_", rtol=1e-6)
     np.testing.assert_array_equal(bf, g["s5_bin_factors"])

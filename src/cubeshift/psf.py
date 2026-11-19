@@ -9,7 +9,7 @@ bins it.  The single padding serves three purposes:
 
 * a blur margin of ~4 sigma per side, so no light is lost or wrapped around;
 * a top-up so each axis is a multiple of the bin factor (nothing is cropped);
-* if cheap enough, the target field of view (otherwise the field is padded on
+* if cheap enough, the simulated telescope's field of view (otherwise the field is padded on
   the coarse grid after binning).
 
 The padding holds the background level with matching noise
@@ -34,15 +34,15 @@ FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
 FINE_FOV_LIMIT = 4096
 
 
-def matching_kernel_fwhm(fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z_sim, cosmo=Planck18):
-    """FWHM (arcsec at z_sim) of the Gaussian that turns the source PSF into the target PSF.
+def matching_kernel_fwhm(fwhm_source_arcsec, fwhm_simulated_arcsec, z_obs, z_sim, cosmo=Planck18):
+    """FWHM (arcsec at z_sim) of the Gaussian that turns the source PSF into the simulated telescope's PSF.
 
     The source PSF (arcsec at z_obs) shrinks by D_A(z_obs)/D_A(z_sim);
-    kernel**2 = target**2 - (f_ang * source)**2, and 0 where the shrunk source
-    PSF is already broader than the target.
+    kernel**2 = simulated**2 - (f_ang * source)**2, and 0 where the shrunk source
+    PSF is already broader than the simulated one.
     """
     fwhm_sim = fwhm_source_arcsec * angular_scale_ratio(z_obs, z_sim, cosmo)
-    return np.sqrt(np.maximum(np.asarray(fwhm_target_arcsec, float) ** 2 - fwhm_sim ** 2, 0.0))
+    return np.sqrt(np.maximum(np.asarray(fwhm_simulated_arcsec, float) ** 2 - fwhm_sim ** 2, 0.0))
 
 
 def gaussian_kernel1d(sigma, truncate=4.0):
@@ -67,13 +67,13 @@ def erf_kernel1d(sigma):
     return k / k.sum()
 
 
-def _target_fwhm(cube, fwhm_target_arcsec):
-    """Target PSF FWHM per wavelength slice (number or callable of wavelength)."""
-    if callable(fwhm_target_arcsec):
+def _simulated_fwhm(cube, fwhm_simulated_arcsec):
+    """Simulated telescope's PSF FWHM per wavelength slice (number or callable of wavelength)."""
+    if callable(fwhm_simulated_arcsec):
         if cube.wave is None:
-            raise ValueError("cube has no wavelength axis; pass the target FWHM as a number")
-        return np.asarray(fwhm_target_arcsec(cube.wave.coord()), float)
-    return np.full(cube.shape[0], float(fwhm_target_arcsec))
+            raise ValueError("cube has no wavelength axis; pass the simulated PSF FWHM as a number")
+        return np.asarray(fwhm_simulated_arcsec(cube.wave.coord()), float)
+    return np.full(cube.shape[0], float(fwhm_simulated_arcsec))
 
 
 def _prebin_factor(b, pixel, sigma_min):
@@ -124,10 +124,10 @@ def _binned_variance(var, good, ky, kx, by, bx):
     return np.clip(full[np.ix_(rows, cols)], 0.0, None)
 
 
-def psf_match_and_bin(cube, bin_x, bin_y, fwhm_source_arcsec=None, fwhm_target_arcsec=None,
+def psf_match_and_bin(cube, bin_x, bin_y, fwhm_source_arcsec=None, fwhm_simulated_arcsec=None,
                       z_obs=None, z_sim=None, background="auto", fov=None, phase="center",
                       noise_scale=1.0, rng=None, fine_fov_limit=FINE_FOV_LIMIT, cosmo=Planck18):
-    """Pad once, blur to the target PSF on the fine grid, then bin.
+    """Pad once, blur to the simulated telescope's PSF on the fine grid, then bin.
 
     Parameters
     ----------
@@ -137,15 +137,15 @@ def psf_match_and_bin(cube, bin_x, bin_y, fwhm_source_arcsec=None, fwhm_target_a
         Integer bin factors.
     fwhm_source_arcsec : float, optional
         Source PSF FWHM in arcsec at z_obs (shrunk to z_sim internally).
-    fwhm_target_arcsec : float or callable, optional
-        Target PSF FWHM in arcsec, or a function of wavelength (Angstrom).
+    fwhm_simulated_arcsec : float or callable, optional
+        PSF FWHM of the simulated telescope in arcsec, or a function of wavelength (Angstrom).
         If None, no blurring (plain binning with the same padding).
     z_obs, z_sim : float
         Needed with a PSF, to shrink the source PSF.
     background : 'auto', 'zero', number or BackgroundEstimate
         Level and noise of the padding (:func:`cubeshift.padding.estimate_background`).
     fov : (float, float), optional
-        Target field of view (x, y) in arcsec.  The output is padded or
+        Field of view (x, y) of the simulated telescope in arcsec.  The output is padded or
         centre-cropped to round(fov / output pixel) pixels.
     phase : 'center' or int
         Position of the bin grid: where the divisibility top-up goes (see
@@ -171,10 +171,10 @@ def psf_match_and_bin(cube, bin_x, bin_y, fwhm_source_arcsec=None, fwhm_target_a
     px, py = pixel_scale_xy(cube)
 
     # --- matching kernel (arcsec) per wavelength slice; zero means no blur
-    if fwhm_target_arcsec is None:
+    if fwhm_simulated_arcsec is None:
         kernel_fwhm = np.zeros(nz)
     else:
-        kernel_fwhm = matching_kernel_fwhm(fwhm_source_arcsec or 0.0, _target_fwhm(cube, fwhm_target_arcsec),
+        kernel_fwhm = matching_kernel_fwhm(fwhm_source_arcsec or 0.0, _simulated_fwhm(cube, fwhm_simulated_arcsec),
                                            z_obs, z_sim, cosmo)
     sigma = kernel_fwhm * FWHM_TO_SIGMA
     sigma_min = sigma[sigma > 0].min() if np.any(sigma > 0) else None
@@ -285,8 +285,8 @@ def psf_match_and_bin(cube, bin_x, bin_y, fwhm_source_arcsec=None, fwhm_target_a
     return out
 
 
-def convolve_to_match_psf(cube, fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z_sim, cosmo=Planck18):
-    """Convolve each wavelength slice so the PSF matches the target instrument (no binning).
+def convolve_to_match_psf(cube, fwhm_source_arcsec, fwhm_simulated_arcsec, z_obs, z_sim, cosmo=Planck18):
+    """Convolve each wavelength slice so the PSF matches the simulated telescope (no binning).
 
     The cube is zero-padded by the blur margin so the PSF wings are kept (the
     output is larger than the input; the WCS is shifted accordingly).  The
@@ -298,10 +298,10 @@ def convolve_to_match_psf(cube, fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z
         WCS at the angular scale of z_sim.
     fwhm_source_arcsec : float
         Source PSF FWHM in arcsec at z_obs.
-    fwhm_target_arcsec : float or callable
-        Target PSF FWHM in arcsec, or a function of wavelength (Angstrom).
+    fwhm_simulated_arcsec : float or callable
+        PSF FWHM of the simulated telescope in arcsec, or a function of wavelength (Angstrom).
     z_obs, z_sim : float
         Original and simulated redshift.
     """
-    return psf_match_and_bin(cube, 1, 1, fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z_sim,
+    return psf_match_and_bin(cube, 1, 1, fwhm_source_arcsec, fwhm_simulated_arcsec, z_obs, z_sim,
                              background="zero", cosmo=cosmo)

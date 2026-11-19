@@ -67,7 +67,7 @@ def resampling_factors(cube, simulated_telescope, z_obs=None, z_sim=None, cosmo=
 
 def resample_cube_to_telescope_and_redshift(cube, simulated_telescope, z_obs, z_sim, trim=True,
                                             noise_scale=1.0, rng=None, cosmo=Planck18,
-                                            fwhm_source_arcsec=None, fwhm_target_arcsec=None,
+                                            fwhm_source_arcsec=None, fwhm_simulated_arcsec=None,
                                             background="auto", phase="center"):
     """Blur to the target PSF and bin to the target spaxels at z_sim, in one padded pass.
 
@@ -97,8 +97,8 @@ def resample_cube_to_telescope_and_redshift(cube, simulated_telescope, z_obs, z_
         Multiplier on the padding noise (the original code used 0.5 for CGCG453).
     rng : numpy.random.Generator, optional
         Random generator for the padding noise; default uses ``np.random``.
-    fwhm_source_arcsec, fwhm_target_arcsec : optional
-        Source PSF (arcsec at z_obs) and target PSF (arcsec, or a function of
+    fwhm_source_arcsec, fwhm_simulated_arcsec : optional
+        Source PSF (arcsec at z_obs) and simulated telescope PSF (arcsec, or a function of
         wavelength).  Without them the cube is only binned.
     background : 'auto', 'zero', number or BackgroundEstimate
         Level and noise of the padding; see :func:`cubeshift.padding.estimate_background`.
@@ -138,7 +138,7 @@ def resample_cube_to_telescope_and_redshift(cube, simulated_telescope, z_obs, z_
     if simulated_telescope.fov_x is not None and simulated_telescope.fov_y is not None:
         fov = (simulated_telescope.fov_x, simulated_telescope.fov_y)
     cube_resampled = psf_match_and_bin(
-        cube, bin_factor_x, bin_factor_y, fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z_sim,
+        cube, bin_factor_x, bin_factor_y, fwhm_source_arcsec, fwhm_simulated_arcsec, z_obs, z_sim,
         background=background, fov=fov, phase=phase, noise_scale=noise_scale, rng=rng, cosmo=cosmo)
 
     dx_arcsec_new, dy_arcsec_new = pixel_scale_xy(cube_resampled)

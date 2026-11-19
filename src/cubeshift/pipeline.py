@@ -164,7 +164,7 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, simulated_telesco
     #    target PSF(lambda)), then bin to the target spaxels
     cube_resampled, bin_factors, _, _, _ = resample_cube_to_telescope_and_redshift(
         transmission_cube, simulated_telescope, z_obs, z_sim, noise_scale=noise_scale, rng=rng, cosmo=cosmo,
-        fwhm_source_arcsec=source_telescope.spatial_fwhm, fwhm_target_arcsec=simulated_telescope.psf_fwhm,
+        fwhm_source_arcsec=source_telescope.spatial_fwhm, fwhm_simulated_arcsec=simulated_telescope.psf_fwhm,
         background=background)
 
     # 6. surface brightness -> flux per binned spaxel (masked spaxels stay masked)
