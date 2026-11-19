@@ -100,7 +100,7 @@ Each takes `--help`.
 | `cubeshift.resample` | `resample_cube_to_telescope_and_redshift`, `shrink_to_redshift`, `get_spaxel_area` |
 | `cubeshift.psf` | `psf_match_and_bin` (pad once, blur on the fine grid, then bin), `convolve_to_match_psf` |
 | `cubeshift.padding` | `estimate_background` (sky from the field border, or mean 0 if the galaxy fills it), `pad_to_shape`, `crop_to_shape` |
-| `cubeshift.spectral` | disperser selection, `resample_spectral_axis`, LSF matching, `apply_dispersion_pipeline` |
+| `cubeshift.spectral` | disperser selection, `match_resolution_and_rebin` (LSF + rebin as one operator, so the variance is right), `resample_spectral_axis`, `match_spectral_resolution`, `apply_dispersion_pipeline` |
 | `cubeshift.throughput` | NIRSpec filter selection and throughput |
 | `cubeshift.extinction` | Milky Way extinction (CCM89) |
 | `cubeshift.cropping`, `cubeshift.io` | cropping helpers; reading FITS (`read_cube`, `read_in_data`, `read_fits`) |
