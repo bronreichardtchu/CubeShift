@@ -192,9 +192,11 @@ def _apply_spectral_operator(cube, M, new_wave_axis):
                     copy=False)
     out_cube.primary_header = cube.primary_header.copy()
     # carry over CubeShift provenance: angular scale, background used for padding,
-    # data footprint, and the original BUNIT string if mpdaf could not parse it
+    # data footprint, the original BUNIT string if mpdaf could not parse it, and
+    # the simulated redshift set in step 1 (review v2 M14)
     out_cube.data_header.extend([c for c in cube.data_header.cards
-                                 if c.keyword.startswith(("CSANG", "CSBKG", "PAD", "CSBUNIT"))])
+                                 if c.keyword.startswith(("CSANG", "CSBKG", "PAD", "CSBUNIT"))
+                                 or c.keyword == "REDSHIFT"])
     return out_cube
 
 

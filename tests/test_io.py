@@ -141,6 +141,8 @@ def test_pipeline_keeps_unit_and_primary_header(mock_data_dir, quiet):
     # metadata kept, input-grid WCS cards dropped from the primary header
     assert res.cube.primary_header["OBJECT"] == "TESTGAL"
     assert not any(k.startswith(("CD1_", "CDELT1", "CRPIX1")) for k in res.cube.primary_header)
+    # the simulated redshift recorded in step 1 reaches the final cube
+    assert res.cube.data_header["REDSHIFT"] == 3.0
 
 
 def test_file_bunit_parsed_or_kept_as_csbunit(tmp_path):
