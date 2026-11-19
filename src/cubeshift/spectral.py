@@ -192,16 +192,17 @@ def _apply_spectral_operator(cube, M, new_wave_axis):
     return out_cube
 
 
-def match_spectral_resolution(cube, R_target, R_input=None):
-    """Degrade the spectral resolution of a cube to ``R_target``.
+def match_spectral_resolution(cube, R_simulated, R_input=None):
+    """Degrade the spectral resolution of a cube to ``R_simulated``.
 
-    Kernel FWHM(lambda) = sqrt((lambda/R_target)**2 - (lambda/R_input)**2), zero
+    Kernel FWHM(lambda) = sqrt((lambda/R_simulated)**2 - (lambda/R_input)**2), zero
     where the input is already coarser.  Flux-conserving, no edge wrapping.
 
     Parameters
     ----------
     cube : mpdaf.obj.Cube
-    R_target : float, array (per wavelength bin) or callable(wavelength_angstrom)
+    R_simulated : float, array (per wavelength bin) or callable(wavelength_angstrom)
+        Resolving power of the simulated telescope (e.g. a NIRSpec grating).
     R_input : float, array or callable, optional
         Resolution of the input cube; None means infinitely resolved.
     """
@@ -210,7 +211,7 @@ def match_spectral_resolution(cube, R_target, R_input=None):
     def _r(R):
         return R(wave) if callable(R) else np.broadcast_to(np.asarray(R, float), wave.shape)
 
-    fwhm2 = (wave / _r(R_target)) ** 2
+    fwhm2 = (wave / _r(R_simulated)) ** 2
     if R_input is not None:
         fwhm2 = fwhm2 - (wave / _r(R_input)) ** 2
     sigma = np.sqrt(np.maximum(fwhm2, 0.0)) * FWHM_TO_SIGMA
