@@ -518,3 +518,37 @@ def test_prebinning_matches_full_resolution(quiet, monkeypatch):
 
     assert np.ma.sum(fast.data) == pytest.approx(np.ma.sum(ref.data), rel=1e-6)
     assert _moments(fast.data[0])[2] == pytest.approx(_moments(ref.data[0])[2], rel=0.02)
+
+
+# --- review v2 M4: variance through the LSF and the rebin --------------------------------
+
+def _noise_cube(nz=400, n=30, seed=1):
+    """Unit-variance white noise: every spaxel is one independent realisation."""
+    from mpdaf.obj import Cube, WaveCoord
+
+    rng = np.random.default_rng(seed)
+    wave = WaveCoord(crval=20000.0, cdelt=0.5, crpix=1, cunit="Angstrom")
+    return Cube(data=rng.standard_normal((nz, n, n)), var=np.ones((nz, n, n)), wave=wave)
+
+
+def test_lsf_and_rebin_variance_monte_carlo():
+    """M4: the scatter over 900 noise spectra matches the propagated variance.
+
+    LSF of R = 2700 at 2 um (FWHM 7.4 A = 15 native pixels), then 3.7 A output
+    pixels.  Doing the two steps separately under-estimated the variance (7x here,
+    2.3x in the review's KCWI -> G235H case).
+    """
+    c = _noise_cube()
+    grid = np.arange(20010.0, 20190.0, 3.7)
+
+    # combined operator: propagated variance == Monte Carlo scatter (averaged over channels)
+    out = spectral.match_resolution_and_rebin(c, 2700.0, grid)
+    mc = np.var(np.asarray(out.data).reshape(out.shape[0], -1), axis=1)
+    prop = np.asarray(out.var)[:, 0, 0]
+    assert np.mean(mc / prop) == pytest.approx(1.0, abs=0.03)
+
+    # the two separate steps give the same data but too small a variance
+    two_step = spectral.resample_spectral_axis(spectral.match_spectral_resolution(c, 2700.0), grid)
+    np.testing.assert_allclose(np.asarray(two_step.data), np.asarray(out.data), rtol=1e-10, atol=1e-12)
+    assert np.mean(mc / np.asarray(two_step.var)[:, 0, 0]) > 1.5
+
