@@ -6,9 +6,9 @@ A Python package to artificially redshift IFU data.
 
 CubeShift simulates how a low-redshift IFU (Integral Field Unit) data cube would look if the
 same galaxy were observed at a higher redshift with a different instrument (currently Keck/KCWI
-→ JWST/NIRSpec). It redshifts the wavelength axis, dims the flux, bins to the target spaxels at
-the new angular scale, pads to the target field of view, matches the PSF and spectral resolution,
-and resamples onto the target wavelength grid.
+→ JWST/NIRSpec). It redshifts the wavelength axis, dims the flux, bins to the simulated telescope's
+spaxels at the new angular scale, pads to its field of view, matches the PSF and spectral
+resolution, and resamples onto its wavelength grid.
 
 > **Status:** the code was recently reorganised into a single package with no intended change to
 > its outputs. The known science issues from the code review are listed as expected failures in
@@ -60,7 +60,7 @@ result.disperser     # e.g. 'g235h'
 result.final_path
 ```
 
-To add an instrument, create a `cubeshift.Telescope(...)` (a target needs `fov_x`/`fov_y`) and pass it
+To add an instrument, create a `cubeshift.Telescope(...)` (a simulated telescope needs `fov_x`/`fov_y`) and pass it
 directly, or add it to `cubeshift.instruments.TELESCOPES`.
 
 ### Keck/KCWI → JWST/NIRSpec with Milky Way extinction

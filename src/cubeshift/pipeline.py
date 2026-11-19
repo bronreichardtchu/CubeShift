@@ -75,10 +75,10 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, simulated_telesco
        spatial WCS to the angular scale of z_sim (D_A(z_obs)/D_A(z_sim)).
     3. Convert flux to surface brightness (per arcsec^2 at z_sim).
     4. Apply the NIRSpec filter throughput for ``line_rest_wavelength``.
-    5. Pad once (PSF margin, multiple of the bin factor, target FOV) with the
+    5. Pad once (PSF margin, multiple of the bin factor, simulated FOV) with the
        background level and noise; on the fine grid, convolve from the source
-       PSF (``source_telescope.spatial_fwhm``, shrunk to z_sim) to the target PSF
-       (``simulated_telescope.psf_fwhm(lambda)``); then bin to the target spaxels.
+       PSF (``source_telescope.spatial_fwhm``, shrunk to z_sim) to the simulated telescope's PSF
+       (``simulated_telescope.psf_fwhm(lambda)``); then bin to its spaxels.
     6. Convert back to flux per (new) spaxel.
     7. Choose a NIRSpec disperser; on the native wavelength grid convolve from the
        source resolution (``source_telescope.spectral_resolution``) to the
@@ -161,7 +161,7 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, simulated_telesco
         redshifted_cube, z_sim, line_rest_wavelength, data_dir=data_dir)
 
     # 5. pad once, match the PSF on the fine grid (source seeing shrunk to z_sim ->
-    #    target PSF(lambda)), then bin to the target spaxels
+    #    simulated telescope's PSF(lambda)), then bin to its spaxels
     cube_resampled, bin_factors, _, _, _ = resample_cube_to_telescope_and_redshift(
         transmission_cube, simulated_telescope, z_obs, z_sim, noise_scale=noise_scale, rng=rng, cosmo=cosmo,
         fwhm_source_arcsec=source_telescope.spatial_fwhm, fwhm_simulated_arcsec=simulated_telescope.psf_fwhm,

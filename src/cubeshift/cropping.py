@@ -21,15 +21,15 @@ def _enforce_min_size(lo, hi, n, min_size):
     return lo, hi
 
 
-def crop_cube_to_size(cube, nx_target, ny_target):
-    """Centre-crop the spatial axes of a cube to (ny_target, nx_target)."""
+def crop_cube_to_size(cube, nx_out, ny_out):
+    """Centre-crop the spatial axes of a cube to (ny_out, nx_out)."""
     nz, ny, nx = cube.shape
-    if nx_target > nx or ny_target > ny:
-        raise ValueError(f"Target size ({ny_target}, {nx_target}) is larger than cube ({ny}, {nx}). "
+    if nx_out > nx or ny_out > ny:
+        raise ValueError(f"Requested size ({ny_out}, {nx_out}) is larger than cube ({ny}, {nx}). "
                          "Cropping cannot enlarge.")
-    x0 = (nx - nx_target) // 2
-    y0 = (ny - ny_target) // 2
-    return cube[:, y0:y0 + ny_target, x0:x0 + nx_target]
+    x0 = (nx - nx_out) // 2
+    y0 = (ny - ny_out) // 2
+    return cube[:, y0:y0 + ny_out, x0:x0 + nx_out]
 
 
 def auto_crop_cube(cube, sigma_thresh=2, threshold_nan=0.1, buffer=4, min_crop_size=30, debug=False):

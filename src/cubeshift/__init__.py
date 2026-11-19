@@ -15,7 +15,7 @@ pipeline      simulate_observation (the full chain)
 redshift      wavelength-axis redshifting, air_to_vac
 cosmology     flux dimming and angular scales
 binning       integer spatial binning (bin_data)
-resample      binning to a target telescope + FOV padding
+resample      binning to the simulated telescope + FOV padding
 psf           spatial PSF matching
 spectral      NIRSpec disperser choice, spectral resampling and LSF matching
 throughput    NIRSpec filter throughput

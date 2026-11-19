@@ -1,4 +1,4 @@
-"""Resampling a cube onto a target telescope's spaxels at the simulated redshift."""
+"""Resampling a cube onto the simulated telescope's spaxels at the simulated redshift."""
 from __future__ import annotations
 
 import astropy.units as u
@@ -69,18 +69,18 @@ def resample_cube_to_telescope_and_redshift(cube, simulated_telescope, z_obs, z_
                                             noise_scale=1.0, rng=None, cosmo=Planck18,
                                             fwhm_source_arcsec=None, fwhm_simulated_arcsec=None,
                                             background="auto", phase="center"):
-    """Blur to the target PSF and bin to the target spaxels at z_sim, in one padded pass.
+    """Blur to the simulated telescope's PSF and bin to its spaxels at z_sim, in one padded pass.
 
     Expects surface-brightness data (the binning averages the summed pixels).
     If the cube is still at the source angular scale it is first shrunk with
     :func:`shrink_to_redshift` and its surface brightness converted to per
     z_sim arcsec^2, so the output WCS is always at the true angular scale of
-    z_sim (binned pixel = bin * p_src * f_ang, which differs from the target
+    z_sim (binned pixel = bin * p_src * f_ang, which differs from the simulated
     pixel by the integer rounding of the bin factor) and multiplying by
     :func:`get_spaxel_area` gives the flux per binned spaxel.
 
     The cube is padded once (blur margin, multiple of the bin factor, and the
-    target field of view when that is cheap), blurred on the fine grid, then
+    simulated field of view when that is cheap), blurred on the fine grid, then
     binned: see :func:`cubeshift.psf.psf_match_and_bin`.  Nothing is cropped
     except, at the end, data larger than the field of view.
 
@@ -125,7 +125,7 @@ def resample_cube_to_telescope_and_redshift(cube, simulated_telescope, z_obs, z_
         if cube.var is not None:
             cube.var = cube.var / f2 ** 2
 
-    # integer bin factors from the target pixel size
+    # integer bin factors from the simulated telescope's pixel size
     s_x, s_y = resampling_factors(cube, simulated_telescope)
     bin_factor_x = max(1, int(round(s_x)))
     bin_factor_y = max(1, int(round(s_y)))

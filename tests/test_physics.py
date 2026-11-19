@@ -18,7 +18,7 @@ Z_OBS, Z_SIM = 0.025, 3.0
 NIRSPEC = TELESCOPES["JWST_NIRSpec"]
 
 
-def _spatial_chain(quiet, target=NIRSPEC):
+def _spatial_chain(quiet, telescope=NIRSPEC):
     """Steps 1-6 of the pipeline (no throughput) on the default test cube."""
     cube = make_test_cube()
     tot0 = np.nansum(cube.data) * cube.wave.get_step()
@@ -27,7 +27,7 @@ def _spatial_chain(quiet, target=NIRSPEC):
         cosmology.scale_cube(rc, cosmology.flux_dimming_factor(Z_OBS, Z_SIM))
         cosmology.scale_cube(rc, 1.0 / resample.get_spaxel_area(rc))
         np.random.seed(0)
-        cr, bf, _, dx, dy = resample.resample_cube_to_telescope_and_redshift(rc, target, Z_OBS, Z_SIM)
+        cr, bf, _, dx, dy = resample.resample_cube_to_telescope_and_redshift(rc, telescope, Z_OBS, Z_SIM)
         cosmology.scale_cube(cr, resample.get_spaxel_area(cr))
     n = cube.shape[1] // bf[0]
     o = (cr.shape[1] - n) // 2
@@ -82,8 +82,8 @@ def _second_moment_fwhm(img, pix):
     return 2.3548 * np.sqrt(sx2) * pix
 
 
-def test_psf_matches_target_at_each_wavelength(quiet):
-    """Review #4: source seeing (shrunk to z_sim) is convolved up to the target's PSF(lambda)."""
+def test_psf_matches_simulated_telescope_at_each_wavelength(quiet):
+    """Review #4: source seeing (shrunk to z_sim) is convolved up to the simulated telescope's PSF(lambda)."""
     from mpdaf.obj import WCS, Cube, WaveCoord
 
     from cubeshift.psf import convolve_to_match_psf
@@ -135,11 +135,11 @@ def test_surface_brightness_dimming():
         resample.shrink_to_redshift(rc, Z_OBS, Z_SIM)
 
 
-def test_rectangular_target_spaxels(quiet):
+def test_rectangular_simulated_spaxels(quiet):
     """Review #13: x/y were swapped twice (cancelling only for square spaxels)."""
     rect = Telescope("rect", spatial_fwhm=0.07, pixel_scale_x=0.1, pixel_scale_y=0.2,
                      spectral_resolution=1000, fov_x=3.0, fov_y=3.0)
-    _, cr, bf, _, _ = _spatial_chain(quiet, target=rect)
+    _, cr, bf, _, _ = _spatial_chain(quiet, telescope=rect)
     dy, dx = np.abs(cr.wcs.get_step(unit="arcsec"))
     assert bf[1] > bf[0]
     assert dy / dx == pytest.approx(bf[1] / bf[0])
@@ -326,11 +326,11 @@ def _moments(img):
 
 
 @pytest.mark.parametrize("z_sim", [4.0, 6.0, 8.0])
-def test_psf_reaches_target_after_binning(quiet, z_sim):
-    """M3: the PSF used to be applied on the binned grid (0.77-0.90 of the target at z = 4-8).
+def test_psf_reaches_simulated_psf_after_binning(quiet, z_sim):
+    """M3: the PSF used to be applied on the binned grid (0.77-0.90 of the simulated PSF at z = 4-8).
 
-    A source with 1" KCWI seeing is shrunk to z_sim, blurred to the target PSF and binned.
-    Its PSF is then max(target, shrunk seeing).  The output is under-sampled (~1 output
+    A source with 1" KCWI seeing is shrunk to z_sim, blurred to the NIRSpec PSF and binned.
+    Its PSF is then max(NIRSpec PSF, shrunk seeing).  The output is under-sampled (~1 output
     pixel per FWHM), so the second moment is averaged over sub-pixel source positions,
     where the output pixel adds exactly p_out^2/12 to sigma^2.
     """
@@ -340,7 +340,7 @@ def test_psf_reaches_target_after_binning(quiet, z_sim):
     pix = 0.29 * f_ang                                   # KCWI pixel at z_sim
     b = int(round(NIRSPEC.pixel_scale_x / pix))
     p_out = pix * b
-    target = float(NIRSPEC.psf_fwhm(35000.0))            # 0.113" (wider than the shrunk seeing)
+    nirspec_psf = float(NIRSPEC.psf_fwhm(35000.0))            # 0.113" (wider than the shrunk seeing)
     sig_src = 1.0 * FWHM_TO_SIGMA / 0.29                 # 1" seeing in KCWI pixels
 
     # average the measured sigma^2 over source positions within one output pixel
@@ -351,12 +351,12 @@ def test_psf_reaches_target_after_binning(quiet, z_sim):
             yy, xx = np.indices((n, n)) - (n - 1) / 2
             img = np.exp(-((xx - dx) ** 2 + (yy - dy) ** 2) / (2 * sig_src ** 2))
             with quiet():
-                out = psf_match_and_bin(_cube_from_image(img, pix), b, b, 1.0, target, Z_OBS, z_sim,
+                out = psf_match_and_bin(_cube_from_image(img, pix), b, b, 1.0, nirspec_psf, Z_OBS, z_sim,
                                         background="zero")
             variances.append((_moments(out.data[0])[2] / 2.3548 * p_out) ** 2)
 
-    # expected: (target PSF or shrunk seeing, whichever is wider) + output pixel box
-    psf = max(target, 1.0 * f_ang)
+    # expected: (NIRSpec PSF or shrunk seeing, whichever is wider) + output pixel box
+    psf = max(nirspec_psf, 1.0 * f_ang)
     expected = np.sqrt((psf * FWHM_TO_SIGMA) ** 2 + p_out ** 2 / 12)
     assert np.sqrt(np.mean(variances)) == pytest.approx(expected, rel=0.03)
 
