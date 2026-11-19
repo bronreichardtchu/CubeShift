@@ -28,17 +28,17 @@ def get_spaxel_area(cube):
 ANGSCALE_KEY = "CSANGSCL"
 
 
-def shrink_to_redshift(cube, z_source, z_target, cosmo=Planck18):
-    """Copy of ``cube`` whose spatial WCS is at the angular scale of z_target.
+def shrink_to_redshift(cube, z_obs, z_sim, cosmo=Planck18):
+    """Copy of ``cube`` whose spatial WCS is at the angular scale of z_sim.
 
     Every spaxel keeps its physical size, so its angular size shrinks by
-    f_ang = D_A(z_source) / D_A(z_target).  The data are not changed.  The
+    f_ang = D_A(z_obs) / D_A(z_sim).  The data are not changed.  The
     factor is recorded in the data header (``CSANGSCL``); calling this on a cube
     that already has it raises ValueError.
     """
     if ANGSCALE_KEY in cube.data_header:
         raise ValueError(f"cube already shrunk to the simulated redshift ({ANGSCALE_KEY} set)")
-    f_ang = angular_scale_ratio(z_source, z_target, cosmo)
+    f_ang = angular_scale_ratio(z_obs, z_sim, cosmo)
     out = cube.copy()
     dy, dx = out.wcs.get_step(unit=u.arcsec)
     out.wcs.set_step([dy * f_ang, dx * f_ang], unit=u.arcsec)
@@ -46,34 +46,36 @@ def shrink_to_redshift(cube, z_source, z_target, cosmo=Planck18):
     return out
 
 
-def resampling_factors(cube, simulated_telescope, z_source=None, z_target=None, cosmo=Planck18):
-    """Raw (non-integer) spatial binning factors (s_x, s_y) = p_target / p_cube(z_target).
+def resampling_factors(cube, simulated_telescope, z_obs=None, z_sim=None, cosmo=Planck18):
+    """Raw (non-integer) spatial binning factors (s_x, s_y) = p_sim / p_cube(z_sim).
+
+    p_sim is the pixel scale of the simulated telescope.
 
     If the cube's WCS is still at the source angular scale (no ``CSANGSCL``
-    keyword), its pixels are first scaled by D_A(z_source)/D_A(z_target), i.e.
-    s = p_target / (p_src * f_ang).  (Equivalently the "Giavalisco" form
-    (1+z_s)^2/(1+z_t)^2 * D_L(z_t)/D_L(z_s) * p_target / p_src.)
+    keyword), its pixels are first scaled by D_A(z_obs)/D_A(z_sim), i.e.
+    s = p_sim / (p_src * f_ang).  (Equivalently the "Giavalisco" form
+    (1+z_obs)^2/(1+z_sim)^2 * D_L(z_sim)/D_L(z_obs) * p_sim / p_src.)
     """
     dx, dy = pixel_scale_xy(cube)
     if ANGSCALE_KEY not in cube.data_header:
-        if z_source is None or z_target is None:
-            raise ValueError("cube is at the source angular scale; z_source and z_target are needed")
-        f_ang = angular_scale_ratio(z_source, z_target, cosmo)
+        if z_obs is None or z_sim is None:
+            raise ValueError("cube is at the source angular scale; z_obs and z_sim are needed")
+        f_ang = angular_scale_ratio(z_obs, z_sim, cosmo)
         dx, dy = dx * f_ang, dy * f_ang
     return simulated_telescope.pixel_scale_x / dx, simulated_telescope.pixel_scale_y / dy
 
 
-def resample_cube_to_telescope_and_redshift(cube, simulated_telescope, z_source, z_target, trim=True,
+def resample_cube_to_telescope_and_redshift(cube, simulated_telescope, z_obs, z_sim, trim=True,
                                             noise_scale=1.0, rng=None, cosmo=Planck18,
                                             fwhm_source_arcsec=None, fwhm_target_arcsec=None,
                                             background="auto", phase="center"):
-    """Blur to the target PSF and bin to the target spaxels at z_target, in one padded pass.
+    """Blur to the target PSF and bin to the target spaxels at z_sim, in one padded pass.
 
     Expects surface-brightness data (the binning averages the summed pixels).
     If the cube is still at the source angular scale it is first shrunk with
     :func:`shrink_to_redshift` and its surface brightness converted to per
-    z_target arcsec^2, so the output WCS is always at the true angular scale of
-    z_target (binned pixel = bin * p_src * f_ang, which differs from the target
+    z_sim arcsec^2, so the output WCS is always at the true angular scale of
+    z_sim (binned pixel = bin * p_src * f_ang, which differs from the target
     pixel by the integer rounding of the bin factor) and multiplying by
     :func:`get_spaxel_area` gives the flux per binned spaxel.
 
@@ -87,7 +89,7 @@ def resample_cube_to_telescope_and_redshift(cube, simulated_telescope, z_source,
     cube : mpdaf.obj.Cube
     simulated_telescope : cubeshift.instruments.Telescope
         Its ``fov_x``/``fov_y`` (if set) define the output field.
-    z_source, z_target : float
+    z_obs, z_sim : float
         Observed and simulated redshift.
     trim : bool
         Remove all-NaN/masked borders of the input before padding.
@@ -96,7 +98,7 @@ def resample_cube_to_telescope_and_redshift(cube, simulated_telescope, z_source,
     rng : numpy.random.Generator, optional
         Random generator for the padding noise; default uses ``np.random``.
     fwhm_source_arcsec, fwhm_target_arcsec : optional
-        Source PSF (arcsec at z_source) and target PSF (arcsec, or a function of
+        Source PSF (arcsec at z_obs) and target PSF (arcsec, or a function of
         wavelength).  Without them the cube is only binned.
     background : 'auto', 'zero', number or BackgroundEstimate
         Level and noise of the padding; see :func:`cubeshift.padding.estimate_background`.
@@ -111,13 +113,13 @@ def resample_cube_to_telescope_and_redshift(cube, simulated_telescope, z_source,
     wave_step : float
         Wavelength step of the cube.
     dx_arcsec_new, dy_arcsec_new : float
-        Pixel scale after binning at z_target (arcsec/pix).
+        Pixel scale after binning at z_sim (arcsec/pix).
     """
     from .psf import psf_match_and_bin
 
-    # make sure the cube is at the angular scale of z_target, in SB per z_target arcsec^2
+    # make sure the cube is at the angular scale of z_sim, in SB per z_sim arcsec^2
     if ANGSCALE_KEY not in cube.data_header:
-        cube = shrink_to_redshift(cube, z_source, z_target, cosmo)
+        cube = shrink_to_redshift(cube, z_obs, z_sim, cosmo)
         f2 = cube.data_header[ANGSCALE_KEY] ** 2
         cube.data = cube.data / f2
         if cube.var is not None:
@@ -136,7 +138,7 @@ def resample_cube_to_telescope_and_redshift(cube, simulated_telescope, z_source,
     if simulated_telescope.fov_x is not None and simulated_telescope.fov_y is not None:
         fov = (simulated_telescope.fov_x, simulated_telescope.fov_y)
     cube_resampled = psf_match_and_bin(
-        cube, bin_factor_x, bin_factor_y, fwhm_source_arcsec, fwhm_target_arcsec, z_source, z_target,
+        cube, bin_factor_x, bin_factor_y, fwhm_source_arcsec, fwhm_target_arcsec, z_obs, z_sim,
         background=background, fov=fov, phase=phase, noise_scale=noise_scale, rng=rng, cosmo=cosmo)
 
     dx_arcsec_new, dy_arcsec_new = pixel_scale_xy(cube_resampled)
