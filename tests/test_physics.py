@@ -552,3 +552,16 @@ def test_lsf_and_rebin_variance_monte_carlo():
     np.testing.assert_allclose(np.asarray(two_step.data), np.asarray(out.data), rtol=1e-10, atol=1e-12)
     assert np.mean(mc / np.asarray(two_step.var)[:, 0, 0]) > 1.5
 
+
+def test_dispersion_pipeline_variance_monte_carlo(mock_data_dir, quiet):
+    """M4 end to end: apply_dispersion_pipeline's variance matches the noise scatter."""
+    from mpdaf.obj import Cube, WaveCoord
+
+    # noise on a fine grid inside the mock G235H range (1.66-3.05 um)
+    rng = np.random.default_rng(2)
+    wave = WaveCoord(crval=19800.0, cdelt=0.5, crpix=1, cunit="Angstrom")
+    c = Cube(data=rng.standard_normal((800, 30, 30)), var=np.ones((800, 30, 30)), wave=wave)
+    with quiet():
+        out, _ = spectral.apply_dispersion_pipeline(c, source_resolution=4000, data_dir=mock_data_dir)
+    mc = np.var(np.asarray(out.data).reshape(out.shape[0], -1), axis=1)
+    assert np.mean(mc / np.asarray(out.var)[:, 0, 0]) == pytest.approx(1.0, abs=0.03)

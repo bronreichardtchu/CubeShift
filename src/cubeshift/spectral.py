@@ -315,6 +315,10 @@ def apply_dispersion_pipeline(redshifted_cube, source_resolution=None, data_dir=
        resolution to the disperser's R(lambda) (redshifting does not change R);
     3. rebin, flux-conservingly, onto the disperser's wavelength grid.
 
+    Steps 2 and 3 are applied as one combined operator
+    (:func:`match_resolution_and_rebin`), so the variance includes the
+    correlation the LSF introduces.
+
     Parameters
     ----------
     redshifted_cube : mpdaf.obj.Cube
@@ -347,6 +351,8 @@ def apply_dispersion_pipeline(redshifted_cube, source_resolution=None, data_dir=
     if np.median(np.diff(cube_cropped.wave.coord())) > np.median(np.diff(table_wave_aa)):
         print("Warning: the cube is more coarsely sampled than the disperser grid.")
 
-    blurred = match_spectral_resolution(cube_cropped, R_nirspec, source_resolution)
-    observed = resample_spectral_axis(blurred, _linear_grid(table_wave_aa))
+    # LSF to the grating's R(lambda) and rebin onto its grid, as one operator so
+    # the variance includes the correlation the LSF introduces (review v2 M4)
+    observed = match_resolution_and_rebin(cube_cropped, R_nirspec, _linear_grid(table_wave_aa),
+                                          R_input=source_resolution)
     return observed, best_disperser["name"]
