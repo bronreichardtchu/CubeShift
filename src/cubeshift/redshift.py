@@ -160,11 +160,20 @@ def _primary_metadata(header):
 
 
 def air_to_vac(wavelength: np.ndarray) -> np.ndarray:
-    """Convert air wavelengths to vacuum (Greisen et al. 2006, eqns 64-65).
+    """Convert air wavelengths to vacuum (IAU standard: dry air at 15 C, 1 atm).
 
-    The error in the index of refraction is ~1e-9, below that of the empirical
-    formula.  Adapted from ``specutils.utils.wcs_utils``.  Whether a file is in
-    air or vacuum is given by CTYPE3 (AWAV/AWAV-LOG = air, WAVE/WAVE-LOG = vacuum).
+    Uses the inversion by N. Piskunov (VALD) of the Morton (2000) / Ciddor
+    (1996) refractive index, which is what the IAU standard air wavelengths
+    are defined with: Halpha 6562.80 -> 6564.61 A, [OIII] 5006.84 -> 5008.24 A.
+    It round-trips with the Morton (2000) vac -> air formula to ~1e-8 A.
+    Valid from ~2000 A into the near-IR.
+
+    The formula used before (Greisen et al. 2006 eq. 65) is the refractivity
+    of air at 0 C, ~5% too high for the 15 C standard: +0.1 A (~5 km/s) at
+    Halpha.
+
+    Whether a file is in air or vacuum is given by CTYPE3 (AWAV/AWAV-LOG = air,
+    WAVE/WAVE-LOG = vacuum).
 
     Parameters
     ----------
@@ -176,5 +185,10 @@ def air_to_vac(wavelength: np.ndarray) -> np.ndarray:
     np.ndarray
         Vacuum wavelength(s) in Angstrom.
     """
-    wlum = wavelength / 10000
-    return (1 + 1e-6 * (287.6155 + 1.62887 / wlum ** 2 + 0.01360 / wlum ** 4)) * wavelength
+    wavelength = np.asarray(wavelength, dtype=float)
+    # squared wavenumber in 1/micron^2 (computed from the air wavelength)
+    s2 = (1e4 / wavelength) ** 2
+    # refractive index n(s) of standard air; lambda_vac = n * lambda_air
+    n = 1.0 + 8.336624212083e-5 + 2.408926869968e-2 / (130.1065924522 - s2) \
+        + 1.599740894897e-4 / (38.92568793293 - s2)
+    return n * wavelength

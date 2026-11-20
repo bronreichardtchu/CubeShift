@@ -20,10 +20,14 @@ def test_every_module_imports(name):
 
 
 def test_air_to_vac():
-    # Greisen et al. 2006 eq. 65 as implemented gives Halpha 6562.80 A (air) -> 6564.71 A.
-    # NB the IAU standard (Morton 1991 / Ciddor) gives 6564.61 A: this formula's
-    # refractivity is ~5% high (0.1 A, ~5 km/s, at Halpha).
-    assert redshift.air_to_vac(np.array([6562.80]))[0] == pytest.approx(6564.71, abs=0.01)
+    """IAU standard (15 C dry air) vacuum wavelengths of strong lines (review v2 M10).
+
+    The old Greisen et al. 2006 eq. 65 (0 C refractivity) gave Halpha 6564.71 A.
+    """
+    # air -> vacuum pairs from the SDSS line list: Hb, [OIII]5007, Ha
+    air = np.array([4861.33, 5006.84, 6562.80])
+    vac = np.array([4862.68, 5008.24, 6564.61])
+    np.testing.assert_allclose(redshift.air_to_vac(air), vac, atol=0.01)
 
 
 def test_read_in_data_always_four_values(tmp_path):
