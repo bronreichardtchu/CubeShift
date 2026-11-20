@@ -114,3 +114,20 @@ def test_redshift_builds_wcs_from_pixscale():
     dy, dx = out.wcs.get_step(unit="arcsec")
     assert (dy, dx) == pytest.approx((0.3, 0.2))
     assert out.wcs.get_axis_increments(unit="arcsec")[1] < 0       # RA increases to the left
+
+
+def test_median_bin_variance_uses_input_variance():
+    """Review v2 M17: the median-bin variance came from the data scatter, not the input var."""
+    from mpdaf.obj import Image
+
+    # noise MC: 40 000 bins of 7 x 7 unit-variance pixels; scatter of the medians
+    # vs the propagated (pi/2) * mean(var) / N (large-N limit, ~0.5% high at N = 49)
+    rng = np.random.default_rng(3)
+    img = Image(data=rng.standard_normal((1400, 1400)), var=np.ones((1400, 1400)))
+    out = binning.bin_data(7, 7, img, method="median")
+    assert np.var(out.data) / np.mean(out.var) == pytest.approx(1.0, abs=0.05)
+
+    # a noiseless ramp with tiny input variance: the gradient is not noise
+    ramp = Image(data=np.tile(np.arange(9.0), (9, 1)), var=np.full((9, 9), 1e-6))
+    out = binning.bin_data(3, 3, ramp, method="median")
+    np.testing.assert_allclose(out.var, (np.pi / 2) * 1e-6 / 9)

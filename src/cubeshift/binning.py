@@ -114,17 +114,25 @@ def _calc_var_mean(newvar: np.ndarray, axes: tuple[int, ...], unmasked: np.ndarr
     return newvar.sum(axis=axes) / unmasked ** 2
 
 
-def _calc_var_median(newdata: np.ndarray, axes: tuple[int, ...], unmasked: np.ndarray) -> np.ndarray:
-    """Estimated variance of a median of N pixels: (1.253 * std(p[i]))**2 / N."""
-    return (1.253 * np.nanstd(newdata, axis=axes)) ** 2 / unmasked
+def _calc_var_median(newvar: np.ndarray, axes: tuple[int, ...], unmasked: np.ndarray) -> np.ndarray:
+    """Variance of a median of N unmasked pixels: (pi/2) * mean(v[i]) / N (review v2 M17).
+
+    For Gaussian noise the median is a (pi/2)-times noisier estimator than the
+    mean, whose variance is sum(v[i]) / N**2.  This is the large-N limit, so for
+    small bins it over-estimates (Monte Carlo: +32% at N = 4, +5% at N = 9,
+    +2% at N = 25, +0.5% at N = 49).  It uses the input
+    variance, not the scatter of the data, which mixes real structure (e.g. a
+    gradient across the bin) into the noise and ignores the input variance.
+    """
+    return (np.pi / 2.0) * newvar.sum(axis=axes) / unmasked ** 2
 
 
-def _bin_var(data_cube: Cube | Image, newdata: np.ndarray, preshape: np.ndarray,
+def _bin_var(data_cube: Cube | Image, preshape: np.ndarray,
              unmasked: np.ndarray, method: str = "sum", surface_brightness: bool = False) -> Cube | Image:
     """Propagate the variance for the chosen binning method.
 
     With ``surface_brightness=True`` (sum divided by N) this is sum(v[i]) / N**2,
-    the same as for the mean.
+    the same as for the mean.  Every method uses only the input variance.
     """
     axes = _bin_axes(data_cube.ndim)
     newvar = data_cube.var.reshape(preshape)
@@ -135,7 +143,7 @@ def _bin_var(data_cube: Cube | Image, newdata: np.ndarray, preshape: np.ndarray,
     elif method == "mean":
         newvar = _calc_var_mean(newvar, axes, unmasked)
     elif method == "median":
-        newvar = _calc_var_median(newdata, axes, unmasked)
+        newvar = _calc_var_median(newvar, axes, unmasked)
     data_cube._var = np.ma.getdata(newvar)
     return data_cube
 
@@ -212,7 +220,7 @@ def bin_data(x_factor: int, y_factor: int, data_cube: Cube | Image, margin: str 
     data_cube = _bin_data(data_cube, newdata, unmasked, method=method,
                           surface_brightness=surface_brightness)
     if data_cube._var is not None:
-        data_cube = _bin_var(data_cube, newdata, preshape, unmasked, method=method,
+        data_cube = _bin_var(data_cube, preshape, unmasked, method=method,
                              surface_brightness=surface_brightness)
     data_cube = _mask_output_array(data_cube, unmasked)
     data_cube = _update_wcs(data_cube, factor)
