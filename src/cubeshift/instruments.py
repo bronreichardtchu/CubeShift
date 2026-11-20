@@ -56,7 +56,7 @@ class Telescope:
 
 
 TELESCOPES = {
-    # FOV is only defined for JWST NIRSpec; add fov_x/fov_y to use others as a target.
+    # FOV is only defined for JWST NIRSpec; add fov_x/fov_y to simulate others.
     "JWST_NIRCam": Telescope(
         name="JWST NIRCam",
         pixel_scale_x=0.031,

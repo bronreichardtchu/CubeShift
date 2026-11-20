@@ -18,7 +18,7 @@ Z_OBS, Z_SIM = 0.025, 3.0
 NIRSPEC = TELESCOPES["JWST_NIRSpec"]
 
 
-def _spatial_chain(quiet, target=NIRSPEC):
+def _spatial_chain(quiet, telescope=NIRSPEC):
     """Steps 1-6 of the pipeline (no throughput) on the default test cube."""
     cube = make_test_cube()
     tot0 = np.nansum(cube.data) * cube.wave.get_step()
@@ -27,7 +27,7 @@ def _spatial_chain(quiet, target=NIRSPEC):
         cosmology.scale_cube(rc, cosmology.flux_dimming_factor(Z_OBS, Z_SIM))
         cosmology.scale_cube(rc, 1.0 / resample.get_spaxel_area(rc))
         np.random.seed(0)
-        cr, bf, _, dx, dy = resample.resample_cube_to_telescope_and_redshift(rc, target, Z_OBS, Z_SIM)
+        cr, bf, _, dx, dy = resample.resample_cube_to_telescope_and_redshift(rc, telescope, Z_OBS, Z_SIM)
         cosmology.scale_cube(cr, resample.get_spaxel_area(cr))
     n = cube.shape[1] // bf[0]
     o = (cr.shape[1] - n) // 2
@@ -82,8 +82,8 @@ def _second_moment_fwhm(img, pix):
     return 2.3548 * np.sqrt(sx2) * pix
 
 
-def test_psf_matches_target_at_each_wavelength(quiet):
-    """Review #4: source seeing (shrunk to z_sim) is convolved up to the target's PSF(lambda)."""
+def test_psf_matches_simulated_telescope_at_each_wavelength(quiet):
+    """Review #4: source seeing (shrunk to z_sim) is convolved up to the simulated telescope's PSF(lambda)."""
     from mpdaf.obj import WCS, Cube, WaveCoord
 
     from cubeshift.psf import convolve_to_match_psf
@@ -135,11 +135,11 @@ def test_surface_brightness_dimming():
         resample.shrink_to_redshift(rc, Z_OBS, Z_SIM)
 
 
-def test_rectangular_target_spaxels(quiet):
+def test_rectangular_simulated_spaxels(quiet):
     """Review #13: x/y were swapped twice (cancelling only for square spaxels)."""
     rect = Telescope("rect", spatial_fwhm=0.07, pixel_scale_x=0.1, pixel_scale_y=0.2,
                      spectral_resolution=1000, fov_x=3.0, fov_y=3.0)
-    _, cr, bf, _, _ = _spatial_chain(quiet, target=rect)
+    _, cr, bf, _, _ = _spatial_chain(quiet, telescope=rect)
     dy, dx = np.abs(cr.wcs.get_step(unit="arcsec"))
     assert bf[1] > bf[0]
     assert dy / dx == pytest.approx(bf[1] / bf[0])
@@ -297,3 +297,271 @@ def test_padding_variance_matches_padding_noise(quiet):
     k = cr.shape[0] // 2
     assert np.std(np.ma.getdata(cr.data)[k][pad]) == pytest.approx(np.sqrt(np.ma.getdata(cr.var)[k][pad].mean()),
                                                                     rel=0.1)
+
+
+# --- review v2: PSF before binning (M3), single padding, background (M1), WCS (M2) ------
+def _cube_from_image(img, pix_arcsec, nw=1, var=None, crpix=None):
+    """Synthetic cube with the same image in every slice, WCS already 'at z_sim' (flagged)."""
+    from mpdaf.obj import WCS, Cube, WaveCoord
+
+    ny, nx = img.shape
+    data = np.repeat(img[None], nw, axis=0)
+    cube = Cube(data=data, var=None if var is None else np.full(data.shape, var),
+                wcs=WCS(crval=(10.0, 10.0), cdelt=(pix_arcsec / 3600, -pix_arcsec / 3600),
+                        crpix=crpix or (ny / 2, nx / 2), shape=(ny, nx), deg=True),
+                wave=WaveCoord(crval=20000.0, cdelt=100.0, crpix=1, cunit="Angstrom", shape=nw))
+    # mark the WCS as already at the z_sim angular scale
+    cube.data_header[resample.ANGSCALE_KEY] = 1.0
+    return cube
+
+
+def _moments(img):
+    """Centroid (y, x) and second-moment FWHM (in pixels, averaged over x and y)."""
+    img = np.ma.filled(img, 0.0)
+    y, x = np.indices(img.shape)
+    tot = img.sum()
+    yc, xc = (img * y).sum() / tot, (img * x).sum() / tot
+    var = (img * ((x - xc) ** 2 + (y - yc) ** 2)).sum() / tot / 2
+    return yc, xc, 2.3548 * np.sqrt(var)
+
+
+@pytest.mark.parametrize("z_sim", [4.0, 6.0, 8.0])
+def test_psf_reaches_simulated_psf_after_binning(quiet, z_sim):
+    """M3: the PSF used to be applied on the binned grid (0.77-0.90 of the simulated PSF at z = 4-8).
+
+    A source with 1" KCWI seeing is shrunk to z_sim, blurred to the NIRSpec PSF and binned.
+    Its PSF is then max(NIRSpec PSF, shrunk seeing).  The output is under-sampled (~1 output
+    pixel per FWHM), so the second moment is averaged over sub-pixel source positions,
+    where the output pixel adds exactly p_out^2/12 to sigma^2.
+    """
+    from cubeshift.psf import FWHM_TO_SIGMA, psf_match_and_bin
+
+    f_ang = cosmology.angular_scale_ratio(Z_OBS, z_sim)
+    pix = 0.29 * f_ang                                   # KCWI pixel at z_sim
+    b = int(round(NIRSPEC.pixel_scale_x / pix))
+    p_out = pix * b
+    nirspec_psf = float(NIRSPEC.psf_fwhm(35000.0))            # 0.113" (wider than the shrunk seeing)
+    sig_src = 1.0 * FWHM_TO_SIGMA / 0.29                 # 1" seeing in KCWI pixels
+
+    # average the measured sigma^2 over source positions within one output pixel
+    n = 61
+    variances = []
+    for dy in range(b):
+        for dx in range(b):
+            yy, xx = np.indices((n, n)) - (n - 1) / 2
+            img = np.exp(-((xx - dx) ** 2 + (yy - dy) ** 2) / (2 * sig_src ** 2))
+            with quiet():
+                out = psf_match_and_bin(_cube_from_image(img, pix), b, b, 1.0, nirspec_psf, Z_OBS, z_sim,
+                                        background="zero")
+            variances.append((_moments(out.data[0])[2] / 2.3548 * p_out) ** 2)
+
+    # expected: (NIRSpec PSF or shrunk seeing, whichever is wider) + output pixel box
+    psf = max(nirspec_psf, 1.0 * f_ang)
+    expected = np.sqrt((psf * FWHM_TO_SIGMA) ** 2 + p_out ** 2 / 12)
+    assert np.sqrt(np.mean(variances)) == pytest.approx(expected, rel=0.03)
+
+
+def test_psf_and_bin_keeps_flux_with_wings(quiet):
+    """Zero padding keeps the PSF wings: a source at the field edge loses no flux."""
+    from cubeshift.psf import psf_match_and_bin
+
+    # bright source 2 pixels from the corner of a 40x40 field
+    img = np.zeros((40, 40))
+    img[2, 2] = 1.0
+    cube = _cube_from_image(img, 0.01)
+    with quiet():
+        out = psf_match_and_bin(cube, 4, 4, 0.0, 0.1, Z_OBS, Z_OBS, background="zero")
+    # total flux = sum(SB) x pixel area, before and after
+    flux_in = img.sum() * 0.01 ** 2
+    dx, dy = resample.pixel_scale_xy(out)
+    assert np.ma.sum(out.data) * dx * dy == pytest.approx(flux_in, rel=1e-6)
+
+
+def test_padding_rule():
+    """One pad: >= the blur margin per side, a multiple of b, the FOV if given, and the phase."""
+    from cubeshift.psf import _pad_amounts
+
+    # margin + divisibility
+    lo, hi = _pad_amounts(n=23, margin=5, b=4, fov_pixels=None, phase="center")
+    assert (23 + lo + hi) % 4 == 0 and lo >= 5 and hi >= 5
+    # field of view larger than the data: pad straight to it
+    lo, hi = _pad_amounts(n=23, margin=5, b=4, fov_pixels=120, phase="center")
+    assert 23 + lo + hi == 120
+    # phase moves the top-up from one side to the other
+    lo0, _ = _pad_amounts(n=23, margin=5, b=4, fov_pixels=None, phase=0)
+    lo3, _ = _pad_amounts(n=23, margin=5, b=4, fov_pixels=None, phase=3)
+    assert lo3 - lo0 == 3
+    with pytest.raises(ValueError):
+        _pad_amounts(n=23, margin=5, b=4, fov_pixels=None, phase=9)
+
+
+@pytest.mark.parametrize("fine_limit", [100000, 10])
+def test_fov_padding_paths_and_crop(quiet, fine_limit):
+    """Small b pads the FOV on the fine grid, large b on the coarse grid: same output size.
+    Data larger than the FOV are centre-cropped."""
+    from cubeshift.psf import psf_match_and_bin
+
+    img = np.zeros((40, 40))
+    img[20, 20] = 1.0
+    cube = _cube_from_image(img, 0.02)
+    with quiet():
+        out = psf_match_and_bin(cube, 5, 5, 0.0, 0.1, Z_OBS, Z_OBS, background="zero",
+                                fov=(3.0, 2.0), fine_fov_limit=fine_limit)
+    assert out.shape[1:] == (round(2.0 / 0.1), round(3.0 / 0.1))
+    with quiet():
+        small = psf_match_and_bin(cube, 5, 5, 0.0, 0.1, Z_OBS, Z_OBS, background="zero", fov=(0.4, 0.4))
+    assert small.shape[1:] == (4, 4)
+
+
+def test_background_modes():
+    """'auto' finds sky in the border, or falls back to mean 0 + difference noise."""
+    from cubeshift.padding import estimate_background
+
+    rng = np.random.default_rng(3)
+    yy, xx = np.indices((40, 40)) - 19.5
+
+    # compact galaxy on sky with mean 0.05 and noise 0.1: source 'sky'
+    img = 5 * np.exp(-(xx ** 2 + yy ** 2) / (2 * 3 ** 2)) + 0.05 + rng.normal(0, 0.1, (40, 40))
+    bkg = estimate_background(_cube_from_image(img, 0.02))
+    assert bkg.source == "sky"
+    assert bkg.mean[0] == pytest.approx(0.05, abs=0.02) and bkg.noise[0] == pytest.approx(0.1, rel=0.15)
+
+    # galaxy filling the field: source 'diff', mean 0, noise from neighbour differences
+    img = 10 * np.exp(-(xx ** 2 + yy ** 2) / (2 * 60 ** 2)) + rng.normal(0, 0.1, (40, 40))
+    bkg = estimate_background(_cube_from_image(img, 0.02))
+    assert bkg.source == "diff" and bkg.mean[0] == 0
+    assert bkg.noise[0] == pytest.approx(0.1, rel=0.1)
+
+    # explicit modes
+    assert estimate_background(_cube_from_image(img, 0.02), "zero").noise[0] == 0
+    assert estimate_background(_cube_from_image(img, 0.02), 2.5).mean[0] == 2.5
+
+
+def test_padding_is_background_not_galaxy_light(quiet):
+    """M1: the padding mean used to come from background() of galaxy-filled slices
+    (2.7x the galaxy's line flux).  Now it is the sky level (here ~0)."""
+    rng = np.random.default_rng(4)
+    yy, xx = np.indices((30, 30)) - 14.5
+    # extended galaxy (reaching ~4 sigma at the field edge) on zero-mean sky noise 0.01
+    img = 1.0 * np.exp(-(xx ** 2 + yy ** 2) / (2 * 6 ** 2)) + rng.normal(0, 0.01, (30, 30))
+    cube = _cube_from_image(img, 0.0192, var=0.01 ** 2)
+    with quiet():
+        out, _, _, _, _ = resample.resample_cube_to_telescope_and_redshift(
+            cube, NIRSPEC, Z_OBS, Z_SIM, rng=np.random.default_rng(5))
+
+    # padding pixels = outside the original footprint recorded in the header
+    h = out.data_header
+    pad = np.ones(out.shape[1:], bool)
+    pad[h["PADY0"]:h["PADY0"] + h["PADNY"], h["PADX0"]:h["PADX0"] + h["PADNX"]] = False
+    data = np.ma.getdata(out.data)[0]
+
+    # padding level within 1 sky sigma of zero, and its total far below the galaxy's
+    assert abs(data[pad].mean()) < 0.01
+    assert abs(data[pad].sum()) < 0.05 * data[~pad].sum()
+    # scatter consistent with the variance assigned to the padding
+    assert data[pad].std() == pytest.approx(np.sqrt(np.ma.getdata(out.var)[0][pad].mean()), rel=0.2)
+
+
+def test_sky_positions_survive_padding_and_binning(quiet):
+    """M2: CRPIX used not to be shifted after FOV padding (sky positions off by the pad offset)."""
+    from cubeshift.psf import psf_match_and_bin
+
+    # off-centre source on a 30x30 grid
+    img = np.zeros((30, 30))
+    img[8:10, 20:22] = 1.0
+    cube = _cube_from_image(img, 0.0192)
+    yc, xc, _ = _moments(img)
+    sky_in = cube.wcs.pix2sky([yc, xc])[0]
+    with quiet():
+        out = psf_match_and_bin(cube, 5, 5, 0.0, 0.07, Z_OBS, Z_OBS, background="zero", fov=(3.0, 3.0))
+    yo, xo, _ = _moments(out.data[0])
+    # sky position of the output centroid, in output pixels
+    yo_exp, xo_exp = out.wcs.sky2pix(sky_in)[0]
+    assert abs(yo - yo_exp) < 0.05 and abs(xo - xo_exp) < 0.05
+
+
+def test_psf_and_bin_variance_monte_carlo(quiet):
+    """Blur-then-bin variance (sum_f H^2 v_f) matches the scatter of white-noise realisations,
+    including padding-only pixels (noise drawn into the padding before the blur)."""
+    from cubeshift.padding import BackgroundEstimate
+    from cubeshift.psf import psf_match_and_bin
+
+    rng = np.random.default_rng(6)
+    sims = []
+    for _ in range(150):
+        cube = _cube_from_image(rng.normal(0, 1, (48, 48)), 0.01, var=1.0)
+        bkg = BackgroundEstimate(np.zeros(1), np.ones(1), "user")      # padding noise = input noise
+        with quiet():
+            out = psf_match_and_bin(cube, 4, 4, 0.0, 0.06, Z_OBS, Z_OBS, background=bkg,
+                                    fov=(1.0, 1.0), rng=rng)
+        sims.append(np.ma.getdata(out.data)[0])
+    mc = np.array(sims).var(axis=0)
+    prop = np.ma.getdata(out.var)[0]
+    assert np.median(mc / prop) == pytest.approx(1.0, rel=0.1)
+
+
+def test_prebinning_matches_full_resolution(quiet, monkeypatch):
+    """Pre-binning (for large bin factors) gives the same FWHM (2%) and flux (1e-6)."""
+    import cubeshift.psf as psf_mod
+
+    img = np.zeros((96, 96))
+    img[47:49, 47:49] = 1.0
+    cube = _cube_from_image(img, 0.002)
+
+    # with pre-binning (q > 1 chosen automatically for a 0.1" kernel on 0.002" pixels)
+    with quiet():
+        fast = psf_mod.psf_match_and_bin(cube, 24, 24, 0.0, 0.1, Z_OBS, Z_OBS, background="zero")
+    # reference: force no pre-binning
+    monkeypatch.setattr(psf_mod, "_prebin_factor", lambda b, p, s: 1)
+    with quiet():
+        ref = psf_mod.psf_match_and_bin(cube, 24, 24, 0.0, 0.1, Z_OBS, Z_OBS, background="zero")
+
+    assert np.ma.sum(fast.data) == pytest.approx(np.ma.sum(ref.data), rel=1e-6)
+    assert _moments(fast.data[0])[2] == pytest.approx(_moments(ref.data[0])[2], rel=0.02)
+
+
+# --- review v2 M4: variance through the LSF and the rebin --------------------------------
+
+def _noise_cube(nz=400, n=30, seed=1):
+    """Unit-variance white noise: every spaxel is one independent realisation."""
+    from mpdaf.obj import Cube, WaveCoord
+
+    rng = np.random.default_rng(seed)
+    wave = WaveCoord(crval=20000.0, cdelt=0.5, crpix=1, cunit="Angstrom")
+    return Cube(data=rng.standard_normal((nz, n, n)), var=np.ones((nz, n, n)), wave=wave)
+
+
+def test_lsf_and_rebin_variance_monte_carlo():
+    """M4: the scatter over 900 noise spectra matches the propagated variance.
+
+    LSF of R = 2700 at 2 um (FWHM 7.4 A = 15 native pixels), then 3.7 A output
+    pixels.  Doing the two steps separately under-estimated the variance (7x here,
+    2.3x in the review's KCWI -> G235H case).
+    """
+    c = _noise_cube()
+    grid = np.arange(20010.0, 20190.0, 3.7)
+
+    # combined operator: propagated variance == Monte Carlo scatter (averaged over channels)
+    out = spectral.match_resolution_and_rebin(c, 2700.0, grid)
+    mc = np.var(np.asarray(out.data).reshape(out.shape[0], -1), axis=1)
+    prop = np.asarray(out.var)[:, 0, 0]
+    assert np.mean(mc / prop) == pytest.approx(1.0, abs=0.03)
+
+    # the two separate steps give the same data but too small a variance
+    two_step = spectral.resample_spectral_axis(spectral.match_spectral_resolution(c, 2700.0), grid)
+    np.testing.assert_allclose(np.asarray(two_step.data), np.asarray(out.data), rtol=1e-10, atol=1e-12)
+    assert np.mean(mc / np.asarray(two_step.var)[:, 0, 0]) > 1.5
+
+
+def test_dispersion_pipeline_variance_monte_carlo(mock_data_dir, quiet):
+    """M4 end to end: apply_dispersion_pipeline's variance matches the noise scatter."""
+    from mpdaf.obj import Cube, WaveCoord
+
+    # noise on a fine grid inside the mock G235H range (1.66-3.05 um)
+    rng = np.random.default_rng(2)
+    wave = WaveCoord(crval=19800.0, cdelt=0.5, crpix=1, cunit="Angstrom")
+    c = Cube(data=rng.standard_normal((800, 30, 30)), var=np.ones((800, 30, 30)), wave=wave)
+    with quiet():
+        out, _ = spectral.apply_dispersion_pipeline(c, source_resolution=4000, data_dir=mock_data_dir)
+    mc = np.var(np.asarray(out.data).reshape(out.shape[0], -1), axis=1)
+    assert np.mean(mc / np.asarray(out.var)[:, 0, 0]) == pytest.approx(1.0, abs=0.03)

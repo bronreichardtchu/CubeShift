@@ -20,10 +20,14 @@ def test_every_module_imports(name):
 
 
 def test_air_to_vac():
-    # Greisen et al. 2006 eq. 65 as implemented gives Halpha 6562.80 A (air) -> 6564.71 A.
-    # NB the IAU standard (Morton 1991 / Ciddor) gives 6564.61 A: this formula's
-    # refractivity is ~5% high (0.1 A, ~5 km/s, at Halpha).
-    assert redshift.air_to_vac(np.array([6562.80]))[0] == pytest.approx(6564.71, abs=0.01)
+    """IAU standard (15 C dry air) vacuum wavelengths of strong lines (review v2 M10).
+
+    The old Greisen et al. 2006 eq. 65 (0 C refractivity) gave Halpha 6564.71 A.
+    """
+    # air -> vacuum pairs from the SDSS line list: Hb, [OIII]5007, Ha
+    air = np.array([4861.33, 5006.84, 6562.80])
+    vac = np.array([4862.68, 5008.24, 6564.61])
+    np.testing.assert_allclose(redshift.air_to_vac(air), vac, atol=0.01)
 
 
 def test_read_in_data_always_four_values(tmp_path):
@@ -36,6 +40,9 @@ def test_read_in_data_always_four_values(tmp_path):
     c.write(str(path))
     lam, data, var, hdr = io.read_in_data(str(path))
     assert data.shape == (6, 4, 5) and var is not None
+    # the STAT extension, not the DATA one (review v2 M5); mpdaf writes it as
+    # float32, and these tiny test variances are denormal there, hence rtol
+    np.testing.assert_allclose(var, c.var, rtol=1e-3)
     np.testing.assert_allclose(lam, c.wave.coord())
 
 
@@ -86,6 +93,22 @@ def test_unknown_telescope():
         cubeshift.simulate_observation(make_test_cube(), 0.025, 3.0, "Keck_KCWI", "Hubble")
 
 
+def test_non_nirspec_simulated_telescope_fails_early_and_clearly():
+    """MUSE -> MUSE used to fail at the filter step with 'No NIRSpec filter mode covers ...' (M15)."""
+    with pytest.raises(NotImplementedError, match="can only simulate JWST NIRSpec"):
+        cubeshift.simulate_observation(make_test_cube(), 0.025, 0.05, "VLT_MUSE", "VLT_MUSE")
+
+
+def test_simulated_telescope_without_fov_fails_early():
+    """A NIRSpec-like simulated telescope without fov_x/fov_y is rejected before any work."""
+    from cubeshift.instruments import Telescope
+
+    nirspec_no_fov = Telescope("NIRSpec no FOV", spatial_fwhm=0.07, pixel_scale_x=0.1, pixel_scale_y=0.1,
+                               spectral_resolution=1000)
+    with pytest.raises(ValueError, match="fov_x and fov_y"):
+        cubeshift.simulate_observation(make_test_cube(), 0.025, 3.0, "Keck_KCWI", nirspec_no_fov)
+
+
 def test_redshift_builds_wcs_from_pixscale():
     """Header without a spatial WCS + pixscale_arcsec (mpdaf takes (y, x) order, no cunit/ctype)."""
     from mpdaf.obj import Cube, WaveCoord
@@ -95,3 +118,20 @@ def test_redshift_builds_wcs_from_pixscale():
     dy, dx = out.wcs.get_step(unit="arcsec")
     assert (dy, dx) == pytest.approx((0.3, 0.2))
     assert out.wcs.get_axis_increments(unit="arcsec")[1] < 0       # RA increases to the left
+
+
+def test_median_bin_variance_uses_input_variance():
+    """Review v2 M17: the median-bin variance came from the data scatter, not the input var."""
+    from mpdaf.obj import Image
+
+    # noise MC: 40 000 bins of 7 x 7 unit-variance pixels; scatter of the medians
+    # vs the propagated (pi/2) * mean(var) / N (large-N limit, ~0.5% high at N = 49)
+    rng = np.random.default_rng(3)
+    img = Image(data=rng.standard_normal((1400, 1400)), var=np.ones((1400, 1400)))
+    out = binning.bin_data(7, 7, img, method="median")
+    assert np.var(out.data) / np.mean(out.var) == pytest.approx(1.0, abs=0.05)
+
+    # a noiseless ramp with tiny input variance: the gradient is not noise
+    ramp = Image(data=np.tile(np.arange(9.0), (9, 1)), var=np.full((9, 9), 1e-6))
+    out = binning.bin_data(3, 3, ramp, method="median")
+    np.testing.assert_allclose(out.var, (np.pi / 2) * 1e-6 / 9)

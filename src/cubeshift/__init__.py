@@ -5,7 +5,7 @@ Typical use::
     import cubeshift
     result = cubeshift.simulate_observation("cube.fits", z_obs=0.025, z_sim=3,
                                             source_telescope="Keck_KCWI",
-                                            target_telescope="JWST_NIRSpec",
+                                            simulated_telescope="JWST_NIRSpec",
                                             data_dir="path/to/jwst_files")
     result.cube.write("simulated.fits")
 
@@ -15,7 +15,7 @@ pipeline      simulate_observation (the full chain)
 redshift      wavelength-axis redshifting, air_to_vac
 cosmology     flux dimming and angular scales
 binning       integer spatial binning (bin_data)
-resample      binning to a target telescope + FOV padding
+resample      binning to the simulated telescope + FOV padding
 psf           spatial PSF matching
 spectral      NIRSpec disperser choice, spectral resampling and LSF matching
 throughput    NIRSpec filter throughput

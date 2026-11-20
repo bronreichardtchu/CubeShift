@@ -10,7 +10,13 @@ sparse matrices and applied to every spaxel at once:
 * :func:`rebin_matrix` - flux-conserving rebinning (piecewise-constant
   spectrum integrated over each output pixel).
 
-Variance is propagated as M**2 @ var (pixel covariance is ignored).
+Variance is propagated as M**2 @ var, exact per output pixel for independent
+input pixels.  The LSF correlates neighbouring pixels, so the LSF and the
+rebin are applied as ONE combined matrix (:func:`match_resolution_and_rebin`);
+chaining them would treat the correlated LSF output as independent and
+under-estimate the variance.  The covariance between output pixels is not
+stored, so summing the variances of several output pixels under-estimates the
+variance of the sum.
 Masked/NaN pixels are excluded; output pixels with less than half their weight
 from good input pixels are masked.
 """
@@ -180,52 +186,119 @@ def _apply_spectral_operator(cube, M, new_wave_axis):
         var = var.reshape(-1, ny, nx)
 
     n_new = len(new_wave_axis)
+    # the operator is linear and dimensionless, so the flux unit is unchanged (review v2 M14)
     out_cube = Cube(data=out.reshape(n_new, ny, nx), var=var, mask=out_mask.reshape(n_new, ny, nx),
-                    wcs=cube.wcs, wave=create_wavecoord_from_axis(new_wave_axis), copy=False)
+                    wcs=cube.wcs, wave=create_wavecoord_from_axis(new_wave_axis), unit=cube.unit,
+                    copy=False)
     out_cube.primary_header = cube.primary_header.copy()
-    out_cube.data_header.extend([c for c in cube.data_header.cards if c.keyword.startswith(("CSANG", "PAD"))])
+    # carry over CubeShift provenance: angular scale, background used for padding,
+    # data footprint, the original BUNIT string if mpdaf could not parse it, the
+    # air -> vacuum flag, and the simulated redshift set in step 1 (review v2 M14)
+    out_cube.data_header.extend([c for c in cube.data_header.cards
+                                 if c.keyword.startswith(("CSANG", "CSBKG", "PAD", "CSBUNIT", "CSAIRVAC"))
+                                 or c.keyword == "REDSHIFT"])
     return out_cube
 
 
-def match_spectral_resolution(cube, R_target, R_input=None):
-    """Degrade the spectral resolution of a cube to ``R_target``.
+def _lsf_operator(wave, R_simulated, R_input=None):
+    """LSF matrix taking a spectrum at resolution ``R_input`` to ``R_simulated`` on the grid ``wave``.
 
-    Kernel FWHM(lambda) = sqrt((lambda/R_target)**2 - (lambda/R_input)**2), zero
+    Kernel FWHM(lambda) = sqrt((lambda/R_simulated)**2 - (lambda/R_input)**2),
+    zero where the input is already coarser.
+    """
+    def _r(R):
+        # a resolving power given as a number, a per-pixel array or a function of wavelength
+        return R(wave) if callable(R) else np.broadcast_to(np.asarray(R, float), wave.shape)
+
+    # kernel width: what has to be added in quadrature to reach R_simulated
+    fwhm2 = (wave / _r(R_simulated)) ** 2
+    if R_input is not None:
+        fwhm2 = fwhm2 - (wave / _r(R_input)) ** 2
+    sigma = np.sqrt(np.maximum(fwhm2, 0.0)) * FWHM_TO_SIGMA
+    return lsf_matrix(wave, sigma)
+
+
+def _rebin_operator(old_wave, new_wave_axis):
+    """(kept new pixel centres, rebin matrix) for the new pixels fully inside the old grid."""
+    new_wave_axis = np.asarray(new_wave_axis, float)
+    # drop new pixels that stick out of the old wavelength range (they would be part-empty)
+    old_edges = pixel_edges(old_wave)
+    new_edges = pixel_edges(new_wave_axis)
+    keep = (new_edges[:-1] >= old_edges[0]) & (new_edges[1:] <= old_edges[-1])
+    new_wave_axis = new_wave_axis[keep]
+    if new_wave_axis.size < 2:
+        raise ValueError("New wavelength grid does not overlap the cube.")
+    return new_wave_axis, rebin_matrix(old_wave, new_wave_axis)
+
+
+def match_spectral_resolution(cube, R_simulated, R_input=None):
+    """Degrade the spectral resolution of a cube to ``R_simulated``.
+
+    Kernel FWHM(lambda) = sqrt((lambda/R_simulated)**2 - (lambda/R_input)**2), zero
     where the input is already coarser.  Flux-conserving, no edge wrapping.
+
+    The output variance is exact per pixel for independent input pixels, but
+    neighbouring output pixels are correlated by the LSF.  To rebin afterwards,
+    use :func:`match_resolution_and_rebin`, which accounts for that.
 
     Parameters
     ----------
     cube : mpdaf.obj.Cube
-    R_target : float, array (per wavelength bin) or callable(wavelength_angstrom)
+    R_simulated : float, array (per wavelength bin) or callable(wavelength_angstrom)
+        Resolving power of the simulated telescope (e.g. a NIRSpec grating).
     R_input : float, array or callable, optional
         Resolution of the input cube; None means infinitely resolved.
     """
     wave = cube.wave.coord()
-
-    def _r(R):
-        return R(wave) if callable(R) else np.broadcast_to(np.asarray(R, float), wave.shape)
-
-    fwhm2 = (wave / _r(R_target)) ** 2
-    if R_input is not None:
-        fwhm2 = fwhm2 - (wave / _r(R_input)) ** 2
-    sigma = np.sqrt(np.maximum(fwhm2, 0.0)) * FWHM_TO_SIGMA
-    return _apply_spectral_operator(cube, lsf_matrix(wave, sigma), wave)
+    return _apply_spectral_operator(cube, _lsf_operator(wave, R_simulated, R_input), wave)
 
 
 def resample_spectral_axis(cube, new_wave_axis):
     """Flux-conserving rebin of every spectrum onto the pixel centres ``new_wave_axis``.
 
     New pixels not fully inside the original range are dropped.  Variance is
-    propagated; masked/NaN input pixels are excluded.
+    propagated (exact per pixel for independent input pixels); masked/NaN input
+    pixels are excluded.
     """
-    new_wave_axis = np.asarray(new_wave_axis, float)
-    old_edges = pixel_edges(cube.wave.coord())
-    new_edges = pixel_edges(new_wave_axis)
-    keep = (new_edges[:-1] >= old_edges[0]) & (new_edges[1:] <= old_edges[-1])
-    new_wave_axis = new_wave_axis[keep]
-    if new_wave_axis.size < 2:
-        raise ValueError("New wavelength grid does not overlap the cube.")
-    return _apply_spectral_operator(cube, rebin_matrix(cube.wave.coord(), new_wave_axis), new_wave_axis)
+    new_wave_axis, rebin = _rebin_operator(cube.wave.coord(), new_wave_axis)
+    return _apply_spectral_operator(cube, rebin, new_wave_axis)
+
+
+def match_resolution_and_rebin(cube, R_simulated, new_wave_axis, R_input=None):
+    """Convolve to ``R_simulated`` and rebin onto ``new_wave_axis`` as ONE linear operator.
+
+    Same data as :func:`match_spectral_resolution` followed by
+    :func:`resample_spectral_axis`, but the variance is right (review v2 M4).
+    The LSF correlates neighbouring pixels, so propagating the variance through
+    the two steps separately (M**2 @ v twice) treats correlated pixels as
+    independent and under-estimates it (~2.3x per pixel for KCWI -> G235H).
+    Here the combined matrix M = rebin @ lsf is applied once, so
+    var_out = (M**2) @ var_in is exact per output pixel for independent input
+    pixels.
+
+    The output pixels are still correlated with their neighbours (the LSF is
+    wider than a pixel) and that covariance is not stored: the variance of a
+    sum over several output pixels (e.g. a line flux) is under-estimated if you
+    simply add their variances.
+
+    Parameters
+    ----------
+    cube : mpdaf.obj.Cube
+    R_simulated : float, array or callable(wavelength_angstrom)
+        Resolving power of the simulated telescope.
+    new_wave_axis : array
+        Output pixel centres (Angstrom); pixels not fully inside the cube's range
+        are dropped.
+    R_input : float, array or callable, optional
+        Resolution of the input cube; None means infinitely resolved.
+    """
+    wave = cube.wave.coord()
+    # 1. LSF on the native (fine) grid: (n_old, n_old)
+    lsf = _lsf_operator(wave, R_simulated, R_input)
+    # 2. rebin from the native grid to the new pixels: (n_new, n_old)
+    new_wave_axis, rebin = _rebin_operator(wave, new_wave_axis)
+    # 3. one combined operator (n_new, n_old) applied to data and variance together
+    return _apply_spectral_operator(cube, (rebin @ lsf).tocsr(), new_wave_axis)
 
 
 def _linear_grid(wave):
@@ -243,6 +316,10 @@ def apply_dispersion_pipeline(redshifted_cube, source_resolution=None, data_dir=
     2. on the cube's native wavelength grid, convolve from the source
        resolution to the disperser's R(lambda) (redshifting does not change R);
     3. rebin, flux-conservingly, onto the disperser's wavelength grid.
+
+    Steps 2 and 3 are applied as one combined operator
+    (:func:`match_resolution_and_rebin`), so the variance includes the
+    correlation the LSF introduces.
 
     Parameters
     ----------
@@ -276,6 +353,8 @@ def apply_dispersion_pipeline(redshifted_cube, source_resolution=None, data_dir=
     if np.median(np.diff(cube_cropped.wave.coord())) > np.median(np.diff(table_wave_aa)):
         print("Warning: the cube is more coarsely sampled than the disperser grid.")
 
-    blurred = match_spectral_resolution(cube_cropped, R_nirspec, source_resolution)
-    observed = resample_spectral_axis(blurred, _linear_grid(table_wave_aa))
+    # LSF to the grating's R(lambda) and rebin onto its grid, as one operator so
+    # the variance includes the correlation the LSF introduces (review v2 M4)
+    observed = match_resolution_and_rebin(cube_cropped, R_nirspec, _linear_grid(table_wave_aa),
+                                          R_input=source_resolution)
     return observed, best_disperser["name"]

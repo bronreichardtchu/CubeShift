@@ -74,7 +74,9 @@ def test_pipeline_chain(golden_chain, mock_data_dir, quiet):
 
     np.random.seed(SEED)
     with quiet():
-        cr, bf, _, dx, dy = resample.resample_cube_to_telescope_and_redshift(tc, nirspec, Z_OBS, Z_SIM)
+        cr, bf, _, dx, dy = resample.resample_cube_to_telescope_and_redshift(
+            tc, nirspec, Z_OBS, Z_SIM, fwhm_source_arcsec=TELESCOPES["Keck_KCWI"].spatial_fwhm,
+            fwhm_simulated_arcsec=nirspec.psf_fwhm)
     # padding noise is float32 in the original code
     assert_matches(cr, g, "s5_resampled_", rtol=1e-6)
     np.testing.assert_array_equal(bf, g["s5_bin_factors"])
@@ -83,13 +85,10 @@ def test_pipeline_chain(golden_chain, mock_data_dir, quiet):
     cosmology.scale_cube(cr, resample.get_spaxel_area(cr))
     assert_matches(cr, g, "s6_flux_", rtol=1e-6)
 
-    with quiet():
-        cp = psf.convolve_to_match_psf(cr, TELESCOPES["Keck_KCWI"].spatial_fwhm, nirspec.psf_fwhm, Z_OBS, Z_SIM)
-    assert_matches(cp, g, "s7_psf_", rtol=1e-6)
 
     with quiet():
         bl, disp = spectral.apply_dispersion_pipeline(
-            cp, source_resolution=TELESCOPES["Keck_KCWI"].spectral_resolution, data_dir=mock_data_dir)
+            cr, source_resolution=TELESCOPES["Keck_KCWI"].spectral_resolution, data_dir=mock_data_dir)
     assert_matches(bl, g, "s8_disp_", rtol=1e-6)
     assert disp == str(g["s8_disperser"])
 

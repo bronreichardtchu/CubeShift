@@ -43,9 +43,9 @@ def _spectral_wcs_keywords_from_wave(cube):
     }
 
 
-def _reproject_cube_preserve_wcs(cube, target_spatial_wcs_astropy, shape_out):
+def _reproject_cube_preserve_wcs(cube, output_spatial_wcs_astropy, shape_out):
     """
-    Reproject every wavelength slice of ``cube`` onto a target 2D spatial WCS.
+    Reproject every wavelength slice of ``cube`` onto an output 2D spatial WCS.
 
     Minimal copy of ``reproject_cube_preserve_wcs`` from the legacy
     ``reprojectBinData.py`` (which is not part of the package).
@@ -54,7 +54,7 @@ def _reproject_cube_preserve_wcs(cube, target_spatial_wcs_astropy, shape_out):
     ----------
     cube : mpdaf.obj.Cube
         Input cube.
-    target_spatial_wcs_astropy : astropy.wcs.WCS
+    output_spatial_wcs_astropy : astropy.wcs.WCS
         2D celestial WCS to reproject onto.
     shape_out : tuple of int
         Output spatial shape (ny, nx).
@@ -79,24 +79,24 @@ def _reproject_cube_preserve_wcs(cube, target_spatial_wcs_astropy, shape_out):
     slice_wcs = AstropyWCS(slice_header)
 
     for i in range(nz):
-        # Reproject the 2D slice to target spatial WCS
+        # Reproject the 2D slice to the output spatial WCS
         reprojected_slice, _footprint = reproject_interp(
             (cube.data[i], slice_wcs),
-            target_spatial_wcs_astropy,
+            output_spatial_wcs_astropy,
             shape_out=shape_out,
         )
         new_data[i] = reprojected_slice
 
-    # Build output WCS header from target spatial WCS header + spectral keywords
-    target_header = target_spatial_wcs_astropy.to_header()
+    # Build output WCS header from the output spatial WCS header + spectral keywords
+    output_header = output_spatial_wcs_astropy.to_header()
     for key, val in _spectral_wcs_keywords_from_wave(cube).items():
-        target_header[key] = val
-    target_header['NAXIS'] = 3
-    target_header['NAXIS1'] = nx
-    target_header['NAXIS2'] = ny
-    target_header['NAXIS3'] = nz
+        output_header[key] = val
+    output_header['NAXIS'] = 3
+    output_header['NAXIS1'] = nx
+    output_header['NAXIS2'] = ny
+    output_header['NAXIS3'] = nz
 
-    new_cube = Cube(data=new_data, wcs=MpdafWCS(target_header), unit=cube.unit)
+    new_cube = Cube(data=new_data, wcs=MpdafWCS(output_header), unit=cube.unit)
     new_cube.wave = cube.wave.copy()
     return new_cube
 
@@ -114,7 +114,7 @@ def test_MUSE_FOV(cube, output_path=None, z_old=0.025, z_new=1, telescope="VLT_M
     z_old, z_new : float
         Observed and simulated redshifts.
     telescope : str or Telescope
-        Target instrument (key of ``TELESCOPES`` or a Telescope instance).
+        Simulated telescope (key of ``TELESCOPES`` or a Telescope instance).
 
     Returns
     -------
@@ -129,27 +129,27 @@ def test_MUSE_FOV(cube, output_path=None, z_old=0.025, z_new=1, telescope="VLT_M
 
     print(f"Redshifting from z = {z_old} to z = {z_new}")
     redshifted_cube, _ = redshift_wavelength_axis(cube, z_old, z_new)
-    # Step 2: Reproject spatially to match target pixel scale
+    # Step 2: Reproject spatially to the simulated telescope's pixel scale
     # Get original WCS
     original_header = redshifted_cube.wcs.to_header()
     original_wcs_astropy = AstropyWCS(original_header)
 
     # Build 2D spatial WCS
     spatial_wcs = original_wcs_astropy.sub([1, 2])
-    target_header = spatial_wcs.to_header()
-    target_header['CDELT1'] = -telescope.pixel_scale_x / 3600.0
-    target_header['CDELT2'] = telescope.pixel_scale_y / 3600.0
+    output_header = spatial_wcs.to_header()
+    output_header['CDELT1'] = -telescope.pixel_scale_x / 3600.0
+    output_header['CDELT2'] = telescope.pixel_scale_y / 3600.0
 
     # Set output shape same as input (you can adjust this later if needed)
     ny, nx = redshifted_cube.shape[1:]
-    target_header['NAXIS1'] = nx
-    target_header['NAXIS2'] = ny
+    output_header['NAXIS1'] = nx
+    output_header['NAXIS2'] = ny
 
-    target_wcs = AstropyWCS(target_header)
+    output_wcs = AstropyWCS(output_header)
     shape_out = (ny, nx)
 
     print("Reprojecting to match MUSE pixel scale")
-    reprojected_cube = _reproject_cube_preserve_wcs(redshifted_cube, target_wcs, shape_out)
+    reprojected_cube = _reproject_cube_preserve_wcs(redshifted_cube, output_wcs, shape_out)
 
     # Step 3: Crop to nonzero region (if needed)
     print("Cropping to region with signal...")
@@ -496,7 +496,7 @@ def get_fluxmap_vmin_vmax(all_flux_maps, lower=0.5, upper=99.5):
     return vmin, vmax
 
 def make_big_maps(cube, z_obs=0.025, redshifts=None,
-                  source_telescope="Keck_KCWI", target_telescope="JWST_NIRSpec",
+                  source_telescope="Keck_KCWI", simulated_telescope="JWST_NIRSpec",
                   **simulate_kwargs):
     """
     Plot 2x2 grids of [O III] flux maps, RGB maps and Hβ/Hγ ratio maps of a
@@ -510,7 +510,7 @@ def make_big_maps(cube, z_obs=0.025, redshifts=None,
         Observed redshift of the real galaxy.
     redshifts : sequence of float, optional
         Redshifts to show (up to 4 panels). Default ``[z_obs, 2.5, 3.0, 4.0]``.
-    source_telescope, target_telescope : str or Telescope
+    source_telescope, simulated_telescope : str or Telescope
         Instruments passed to :func:`cubeshift.pipeline.simulate_observation`
         (key of ``TELESCOPES`` or a Telescope instance).
     **simulate_kwargs
@@ -519,11 +519,11 @@ def make_big_maps(cube, z_obs=0.025, redshifts=None,
     """
     all_rgb_images = []  # Will hold tuples: (R, G, B)
 
-    # === Target redshifts for simulation ===
+    # === Simulated redshifts ===
     if redshifts is None:
         redshifts = [z_obs, 2.5, 3.0, 4.0]
     source_telescope = _as_telescope(source_telescope)
-    target_telescope = _as_telescope(target_telescope)
+    simulated_telescope = _as_telescope(simulated_telescope)
     oiii_rest = 5007
     rest_waves=(4861, 5007, 4500) # Hβ 4861Å, [O III] 5007Å, Stellar Continuum ~4500Å
 
@@ -572,7 +572,7 @@ def make_big_maps(cube, z_obs=0.025, redshifts=None,
         else:
             try:
                 result = simulate_observation(
-                    cube, z_obs, z, source_telescope, target_telescope, **simulate_kwargs
+                    cube, z_obs, z, source_telescope, simulated_telescope, **simulate_kwargs
                 )
                 cube_z = result.cube
                 trans_filter_name = result.filter_name

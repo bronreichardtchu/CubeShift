@@ -24,7 +24,7 @@ def main(argv=None):
     parser.add_argument("--redshifts", type=float, nargs="+", default=[3.0, 4.0, 5.0],
                         help="Simulated redshifts (up to 3; the original is always shown first)")
     parser.add_argument("--source-telescope", default="Keck_KCWI", choices=sorted(TELESCOPES))
-    parser.add_argument("--target-telescope", default="JWST_NIRSpec", choices=sorted(TELESCOPES))
+    parser.add_argument("--simulated-telescope", default="JWST_NIRSpec", choices=sorted(TELESCOPES))
     parser.add_argument("--data-dir", default=None, help="Passed to simulate_observation")
     parser.add_argument("--output-dir", default=None, help="Passed to simulate_observation")
     parser.add_argument("--show-filter-bands", action="store_true",
@@ -35,7 +35,7 @@ def main(argv=None):
     z_obs = args.z_obs
     redshifts = [z_obs] + list(args.redshifts)[:3]
     source_telescope = TELESCOPES[args.source_telescope]
-    target_telescope = TELESCOPES[args.target_telescope]
+    simulated_telescope = TELESCOPES[args.simulated_telescope]
 
     filter_info = {}
     cubes = []
@@ -47,7 +47,7 @@ def main(argv=None):
             disp_filter_name = None
         else:
             result = simulate_observation(
-                cube, z_obs, z, source_telescope, target_telescope,
+                cube, z_obs, z, source_telescope, simulated_telescope,
                 data_dir=args.data_dir, output_dir=args.output_dir,
             )
             cube_z = result.cube

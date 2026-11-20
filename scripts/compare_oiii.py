@@ -52,7 +52,7 @@ def main(argv=None):
     parser.add_argument("--redshifts", type=float, nargs="+", default=[2.5, 3.0, 4.0],
                         help="Simulated redshifts (up to 3; the original is always shown first)")
     parser.add_argument("--source-telescope", default="Keck_KCWI", choices=sorted(TELESCOPES))
-    parser.add_argument("--target-telescope", default="JWST_NIRCam", choices=sorted(TELESCOPES))
+    parser.add_argument("--simulated-telescope", default="JWST_NIRCam", choices=sorted(TELESCOPES))
     parser.add_argument("--data-dir", default=None, help="Passed to simulate_observation")
     parser.add_argument("--output-dir", default=None, help="Passed to simulate_observation")
     args = parser.parse_args(argv)
@@ -61,7 +61,7 @@ def main(argv=None):
     z_obs = args.z_obs
     redshifts = [z_obs] + list(args.redshifts)[:3]
     source_telescope = TELESCOPES[args.source_telescope]
-    target_telescope = TELESCOPES[args.target_telescope]
+    simulated_telescope = TELESCOPES[args.simulated_telescope]
 
     # === Create 2x2 plot ===
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
@@ -76,7 +76,7 @@ def main(argv=None):
                 cube_z = cube
             else:
                 cube_z = simulate_observation(
-                    cube, z_obs, z, source_telescope, target_telescope,
+                    cube, z_obs, z, source_telescope, simulated_telescope,
                     data_dir=args.data_dir, output_dir=args.output_dir,
                 ).cube
 
