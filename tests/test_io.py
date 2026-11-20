@@ -187,3 +187,59 @@ def test_surface_brightness_steps_carry_per_arcsec2_unit(mock_data_dir, quiet, t
     assert Cube(res.intermediate_paths["fluxscaled"]).unit == flux_unit / u.arcsec ** 2
     # step 6 output: back to flux per spaxel
     assert Cube(res.intermediate_paths["rebinned_fluxscaled"]).unit == flux_unit
+
+
+# --- M10: air -> vacuum before redshifting ---------------------------------------------
+
+def _awav_cube(ctype="AWAV"):
+    """A Cube on an air-wavelength axis with pixel 101 at [OIII] 5006.84 A (air)."""
+    from mpdaf.obj import WCS, Cube, WaveCoord
+
+    wcs = WCS(crval=(0.0, 0.0), cdelt=(1e-4, -1e-4), crpix=(1, 1), shape=(2, 3), deg=True)
+    wave = WaveCoord(crval=5006.84, cdelt=0.5, crpix=101, cunit="Angstrom", ctype=ctype)
+    return Cube(data=np.ones((200, 2, 3)), wcs=wcs, wave=wave)
+
+
+def test_air_input_is_converted_to_vacuum_before_redshift():
+    """[OIII] at 5006.84 A in air lands at 5008.24 A (vacuum) x (1+z_sim)/(1+z_obs)."""
+    from cubeshift.redshift import redshift_wavelength_axis
+
+    out, _ = redshift_wavelength_axis(_awav_cube(), 0.0, 3.0)
+    # pixel 101 (index 100), to 0.01 A in the rest frame
+    assert out.wave.coord()[100] == pytest.approx(5008.24 * 4.0, abs=0.04)
+    # the output axis is labelled vacuum, and the conversion is recorded
+    assert out.wave.wcs.wcs.ctype[0] == "WAVE"
+    assert out.data_header["CSAIRVAC"]
+
+
+def test_air_flag_can_be_overridden_and_vacuum_is_untouched():
+    """air_wavelengths=False skips the conversion; a vacuum (WAVE) axis is only stretched."""
+    from cubeshift.redshift import redshift_wavelength_axis
+
+    out, _ = redshift_wavelength_axis(_awav_cube(), 0.0, 3.0, air_wavelengths=False)
+    assert out.wave.coord()[100] == pytest.approx(5006.84 * 4.0)
+    out, _ = redshift_wavelength_axis(_awav_cube(ctype="WAVE"), 0.0, 3.0)
+    assert out.wave.coord()[100] == pytest.approx(5006.84 * 4.0)
+    assert "CSAIRVAC" not in out.data_header
+
+
+def test_air_file_input_is_converted(tmp_path):
+    """The FITS-file branch reads CTYPE3 = AWAV from the header."""
+    from cubeshift.redshift import redshift_wavelength_axis
+
+    path = str(tmp_path / "awav.fits")
+    _awav_cube().write(path)
+    out, _ = redshift_wavelength_axis(path, 0.0, 3.0)
+    assert out.wave.coord()[100] == pytest.approx(5008.24 * 4.0, abs=0.04)
+
+
+def test_log_wavelength_axis_is_refused(tmp_path):
+    """A log-spaced axis would be read as linear; raise instead."""
+    from cubeshift.redshift import redshift_wavelength_axis
+
+    path = tmp_path / "log.fits"
+    hdr = _spectral_header()
+    hdr["CTYPE3"] = "WAVE-LOG"
+    fits.PrimaryHDU(np.ones((4, 2, 3)), header=hdr).writeto(path)
+    with pytest.raises(NotImplementedError, match="log-spaced"):
+        redshift_wavelength_axis(str(path), 0.0, 1.0, pixscale_arcsec=0.2)

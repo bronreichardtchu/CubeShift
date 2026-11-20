@@ -65,12 +65,12 @@ def _check_simulated_telescope(telescope):
 def simulate_observation(cube, z_obs, z_sim, source_telescope, simulated_telescope, *,
                          data_dir=None, output_dir=None, galaxy_name=None, save_intermediates=False,
                          line_rest_wavelength=5007, noise_scale=1.0, rng=None, cosmo=Planck18,
-                         background="auto"):
+                         background="auto", air_wavelengths=None):
     """Simulate how a cube would look observed with another telescope at another redshift.
 
     Steps
     -----
-    1. Redshift the wavelength axis.
+    1. Redshift the wavelength axis (converting air wavelengths to vacuum first).
     2. Dim the flux densities (luminosity distance and (1+z)), and shrink the
        spatial WCS to the angular scale of z_sim (D_A(z_obs)/D_A(z_sim)).
     3. Convert flux to surface brightness (per arcsec^2 at z_sim).
@@ -111,6 +111,9 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, simulated_telesco
         (see :func:`cubeshift.padding.estimate_background`).
     rng : numpy.random.Generator, optional
         Random generator for the padding noise.
+    air_wavelengths : bool, optional
+        Whether the input wavelengths are in air.  Default None: from CTYPE3
+        (AWAV = air).  Set it when the header has lost CTYPE3.
 
     Returns
     -------
@@ -145,7 +148,7 @@ def simulate_observation(cube, z_obs, z_sim, source_telescope, simulated_telesco
 
     # 1. redshift wavelength axis
     # (a path and a Cube take different branches of io.read_in_data; pass through unchanged)
-    redshifted_cube, _ = redshift_wavelength_axis(cube, z_obs, z_sim)
+    redshifted_cube, _ = redshift_wavelength_axis(cube, z_obs, z_sim, air_wavelengths=air_wavelengths)
     _save(redshifted_cube, "redshifted")
 
     # 2. flux dimming;  2b. angular size at z_sim;  3. flux -> surface brightness per z_sim arcsec^2

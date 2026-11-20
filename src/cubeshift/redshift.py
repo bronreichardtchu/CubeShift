@@ -13,11 +13,17 @@ from mpdaf.tools import fix_unit_read
 from .io import read_in_data
 
 
-def redshift_wavelength_axis(filename, z_obs, z_sim, pixscale_arcsec=None, keep_ra_negative=True):
+def redshift_wavelength_axis(filename, z_obs, z_sim, pixscale_arcsec=None, keep_ra_negative=True,
+                             air_wavelengths=None):
     """Redshift the wavelength axis of a cube from z_obs to z_sim.
 
     lambda_new = lambda_old * (1 + z_sim) / (1 + z_obs).  Data values are not
     changed (see :func:`cubeshift.cosmology.rescale_flux` for the dimming).
+
+    Air wavelengths (CTYPE3 = 'AWAV', as in KCWI cubes) are converted to vacuum
+    with :func:`air_to_vac` *before* the stretch, because the simulated (JWST)
+    spectra are in vacuum and the air/vacuum offset (+88 km/s at 5000 A) does
+    not scale with redshift.  The output axis is always vacuum ('WAVE').
 
     Parameters
     ----------
@@ -33,6 +39,9 @@ def redshift_wavelength_axis(filename, z_obs, z_sim, pixscale_arcsec=None, keep_
         applied to both axes.
     keep_ra_negative : bool
         If building a WCS, use the conventional negative CDELT1 for RA.
+    air_wavelengths : bool, optional
+        Whether the input wavelengths are in air.  Default None: read it from
+        CTYPE3 (AWAV = air; anything else, including no CTYPE3, = vacuum).
 
     Returns
     -------
@@ -43,20 +52,37 @@ def redshift_wavelength_axis(filename, z_obs, z_sim, pixscale_arcsec=None, keep_
     if header is None:
         header = fits.Header()
 
+    # the spectral axis type (AWAV = air, WAVE = vacuum) and unit of the input
+    if isinstance(filename, Cube):
+        ctype3 = str(filename.wave.wcs.wcs.ctype[0])
+        wave_unit = filename.wave.unit
+    else:
+        ctype3 = str(header.get("CTYPE3", ""))
+        wave_unit = header.get("CUNIT3") or header.get("WCSDIM3") or "Angstrom"
+    # log-spaced axes would need a non-linear WaveCoord; refuse rather than mislabel
+    if ctype3.upper().endswith("-LOG"):
+        raise NotImplementedError(f"log-spaced wavelength axes (CTYPE3 = {ctype3!r}) are not supported")
+    if air_wavelengths is None:
+        air_wavelengths = ctype3.upper().startswith("AWAV")
+
     # every wavelength is stretched by the same factor
     stretch = (1.0 + z_sim) / (1.0 + z_obs)
-    lam_new = lam_old * stretch
 
-    if isinstance(filename, Cube):
+    if air_wavelengths:
+        # air -> vacuum on the input axis, then stretch (review v2 M10)
+        lam_new = _air_to_vac_in_unit(lam_old, wave_unit) * stretch
+        wave = _linear_wavecoord(lam_new, wave_unit)
+    elif isinstance(filename, Cube):
         # Cube input: its WaveCoord already knows the reference pixel and unit, so
         # scaling CRVAL and CDELT by the stretch gives exactly lam_old * stretch
         wave = filename.wave.copy()
         wave.set_crval(filename.wave.get_crval() * stretch)
         wave.set_step(filename.wave.get_step() * stretch)
+        lam_new = lam_old * stretch
     else:
         # FITS input: build a linear axis from the (CRPIX3-aware) wavelengths,
         # with the unit from the header if present, else Angstrom
-        wave_unit = header.get("CUNIT3") or header.get("WCSDIM3") or "Angstrom"
+        lam_new = lam_old * stretch
         wave = WaveCoord(crval=lam_new[0], cdelt=np.median(np.diff(lam_new)), crpix=1,
                          cunit=wave_unit, ctype="WAVE")
 
@@ -115,7 +141,34 @@ def redshift_wavelength_axis(filename, z_obs, z_sim, pixscale_arcsec=None, keep_
     if csbunit:
         redshifted_cube.data_header["CSBUNIT"] = (csbunit, "original BUNIT of the input cube")
     redshifted_cube.data_header["REDSHIFT"] = (z_sim, "Simulated redshift applied to wavelength axis")
+    # record that the input was converted from air to vacuum
+    if air_wavelengths:
+        redshifted_cube.data_header["CSAIRVAC"] = (True, "input air wavelengths converted to vacuum")
     return redshifted_cube, lam_new
+
+
+def _air_to_vac_in_unit(lam, unit):
+    """:func:`air_to_vac` for wavelengths in any length unit (it works in Angstrom)."""
+    unit = u.Unit(unit)
+    lam_aa = (np.asarray(lam, float) * unit).to_value(u.AA)
+    return (air_to_vac(lam_aa) * u.AA).to_value(unit)
+
+
+def _linear_wavecoord(lam, unit, max_dev_pix=0.01):
+    """Vacuum WaveCoord for a nearly linear axis ``lam`` (least-squares straight line).
+
+    A linear air grid is no longer exactly linear in vacuum (the refractive
+    index depends on wavelength), but over an optical IFU band it deviates by
+    ~0.002 A, under 1% of a pixel.  Warn if the deviation exceeds
+    ``max_dev_pix`` pixels.
+    """
+    # straight-line fit lambda = crval + cdelt * i, with i = 0 at the first pixel
+    idx = np.arange(lam.size)
+    cdelt, crval = np.polyfit(idx, lam, 1)
+    dev = np.max(np.abs(lam - (crval + cdelt * idx))) / abs(cdelt)
+    if dev > max_dev_pix:
+        warnings.warn(f"the vacuum wavelength axis deviates from linear by {dev:.3f} pixels")
+    return WaveCoord(crval=crval, cdelt=cdelt, crpix=1, cunit=unit, ctype="WAVE")
 
 
 def _unit_from_bunit(bunit):
