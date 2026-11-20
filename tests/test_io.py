@@ -243,3 +243,14 @@ def test_log_wavelength_axis_is_refused(tmp_path):
     fits.PrimaryHDU(np.ones((4, 2, 3)), header=hdr).writeto(path)
     with pytest.raises(NotImplementedError, match="log-spaced"):
         redshift_wavelength_axis(str(path), 0.0, 1.0, pixscale_arcsec=0.2)
+
+
+def test_pipeline_records_air_to_vacuum(mock_data_dir, quiet):
+    """The CSAIRVAC flag set in step 1 reaches the final cube."""
+    from cubeshift import simulate_observation
+    from cubeshift.testing import make_test_cube
+
+    with quiet():
+        res = simulate_observation(make_test_cube(), 0.025, 3.0, "Keck_KCWI", "JWST_NIRSpec",
+                                   data_dir=mock_data_dir, air_wavelengths=True)
+    assert res.cube.data_header["CSAIRVAC"]
